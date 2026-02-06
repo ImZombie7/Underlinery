@@ -6,7 +6,7 @@
 ![Strategy](https://img.shields.io/badge/strategy-first-critical)
 ![RNG](https://img.shields.io/badge/RNG-none-black)
 ![AntiRNG](https://img.shields.io/badge/anti--rng-enforced-darkred)
-![Thinking](https://img.shields.io/badge/thinking-game-brainpower-purple)
+![Thinking](https://img.shields.io/badge/thinking-brainpower-purple)
 ![System](https://img.shields.io/badge/system-driven-purple)
 ![Design](https://img.shields.io/badge/design-philosophy--first-brown)
 
