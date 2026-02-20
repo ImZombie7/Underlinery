@@ -163,6 +163,14 @@ function render() {
           });
         }
 
+        if (selectedCell &&
+            selectedCell.r === r &&
+            selectedCell.c === c &&
+            gameState.phase === "placement" &&
+            isActive) {
+          cell.classList.add("selected");
+        }
+
         container.appendChild(cell);
       }
     }
