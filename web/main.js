@@ -1,148 +1,77 @@
-// MAIN CONTROLLER — RULEBOOK ALIGNED
+// web/main.js
 
-const gameState = {
-  phase: "toss", // "toss" | "placement" | "match" | "gameover"
-  currentPlayer: 0,
-  calledNumbers: [],
-  winner: null,
-  players: [
-    { grid: initGrid(), ticks: 0, placementCount: 0, locked: false },
-    { grid: initGrid(), ticks: 0, placementCount: 0, locked: false }
-  ]
+const socket = new WebSocket("ws://localhost:8080");
+
+let playerIndex = null;
+let gameState = null;
+let selectedCell = null;
+
+socket.onmessage = (event) => {
+  const { type, payload } = JSON.parse(event.data);
+
+  if (type === "JOIN_GAME") {
+    playerIndex = payload.playerIndex;
+  }
+
+  if (type === "GAME_STATE_UPDATE") {
+    gameState = payload;
+    render();
+  }
+
+  if (type === "GAME_OVER") {
+    alert(`Player ${payload.winner + 1} wins.`);
+  }
+
+  if (type === "ERROR") {
+    alert(payload);
+  }
 };
 
-const numberInput = document.getElementById("numberInput");
-const actionBtn = document.getElementById("actionBtn");
-const statusText = document.getElementById("status");
-const calledNumbersDiv = document.getElementById("called-numbers");
-
-// --- TOSS PHASE ---
-
-function runToss() {
-  const tossWinner = Math.random() < 0.5 ? 0 : 1;
-  gameState.currentPlayer = tossWinner;
-  gameState.phase = "placement";
-  statusText.textContent = `Player ${tossWinner + 1} won toss. Placement begins.`;
-}
-
-// --- ACTION HANDLER ---
-
-actionBtn.addEventListener("click", handleAction);
-
-function handleAction() {
+document.getElementById("actionBtn").onclick = () => {
+  if (!gameState) return;
   if (gameState.phase === "gameover") return;
 
-  const value = parseInt(numberInput.value);
-  if (!Number.isInteger(value)) return;
+  const number = parseInt(document.getElementById("numberInput").value);
+  if (!Number.isInteger(number)) return;
 
   if (gameState.phase === "placement") {
-    handlePlacement(value);
-  } else if (gameState.phase === "match") {
-    handleMatch(value);
+    if (!selectedCell) return;
+
+    socket.send(JSON.stringify({
+      type: "PLACE_NUMBER",
+      payload: {
+        r: selectedCell.r,
+        c: selectedCell.c,
+        number
+      }
+    }));
   }
 
-  numberInput.value = "";
-}
-
-// --- PLACEMENT PHASE ---
-
-function handlePlacement(number) {
-  const player = gameState.players[gameState.currentPlayer];
-
-  if (player.locked) return;
-
-  // Placement must be intentional: use selectedCell
-  if (!selectedCell) return;
-
-  const { r, c } = selectedCell;
-
-  const placed = placeNumber(player.grid, r, c, number);
-  if (!placed) return;
-
-  player.placementCount++;
-
-  if (player.placementCount === 121) {
-    player.locked = true;
+  if (gameState.phase === "match") {
+    socket.send(JSON.stringify({
+      type: "CALL_NUMBER",
+      payload: { number }
+    }));
   }
-
-  if (gameState.players.every(p => p.locked)) {
-    gameState.phase = "match";
-    gameState.currentPlayer = 0;
-    statusText.textContent = "Match phase begins.";
-  } else {
-    switchTurn();
-  }
-
-  selectedCell = null;
-  render();
-}
-
-// --- MATCH PHASE ---
-
-function handleMatch(number) {
-  if (gameState.calledNumbers.includes(number)) return;
-
-  gameState.calledNumbers.push(number);
-
-  // symmetric crossing
-  gameState.players.forEach(p => {
-    crossNumber(p.grid, number);
-  });
-
-  // per-grid tick calculation
-  gameState.players.forEach(p => {
-    const result = scanCompletedLines(p.grid);
-    p.ticks = countTicks(result);
-  });
-
-  updateCalledNumbers();
-
-  // win check (11 required)
-  for (let i = 0; i < 2; i++) {
-    if (gameState.players[i].ticks >= 11) {
-      gameState.phase = "gameover";
-      gameState.winner = i;
-      statusText.textContent = `Player ${i + 1} wins.`;
-      render();
-      return;
-    }
-  }
-
-  switchTurn();
-  render();
-}
-
-// --- TURN SWITCH ---
-
-function switchTurn() {
-  gameState.currentPlayer = gameState.currentPlayer === 0 ? 1 : 0;
-  statusText.textContent = `Player ${gameState.currentPlayer + 1}'s turn.`;
-}
-
-// --- RENDER ---
-
-let selectedCell = null;
+};
 
 function render() {
   gameState.players.forEach((player, index) => {
     const container = document.getElementById(`grid-${index}`);
     container.innerHTML = "";
 
-    const isActive = index === gameState.currentPlayer;
+    const isActive = index === playerIndex;
 
-    for (let r = 0; r < GRID_SIZE; r++) {
-      for (let c = 0; c < GRID_SIZE; c++) {
+    for (let r = 0; r < 11; r++) {
+      for (let c = 0; c < 11; c++) {
         const cell = document.createElement("div");
         cell.classList.add("cell");
 
         const value = player.grid[r][c];
 
-        // Hidden information enforcement
-        if (
-          gameState.phase === "match" &&
-          !isActive &&
-          value !== "X"
-        ) {
+        if (gameState.phase === "match" &&
+            index !== playerIndex &&
+            value !== "X") {
           cell.textContent = "";
         } else {
           cell.textContent = value === null ? "" : value;
@@ -152,24 +81,12 @@ function render() {
           cell.classList.add("marked");
         }
 
-        // placement selection only during placement
-        if (
-          gameState.phase === "placement" &&
-          isActive &&
-          value === null
-        ) {
-          cell.addEventListener("click", () => {
+        if (gameState.phase === "placement" &&
+            index === playerIndex &&
+            value === null) {
+          cell.onclick = () => {
             selectedCell = { r, c };
-            render();
-          });
-        }
-
-        if (selectedCell &&
-            selectedCell.r === r &&
-            selectedCell.c === c &&
-            gameState.phase === "placement" &&
-            isActive) {
-          cell.classList.add("selected");
+          };
         }
 
         container.appendChild(cell);
@@ -179,14 +96,7 @@ function render() {
     document.getElementById(`ticks-${index}`).textContent =
       `Ticks: ${player.ticks}`;
   });
-}
 
-function updateCalledNumbers() {
-  calledNumbersDiv.textContent =
+  document.getElementById("called-numbers").textContent =
     "Called: " + gameState.calledNumbers.join(", ");
 }
-
-// --- INIT ---
-
-runToss();
-render();
