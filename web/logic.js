@@ -1,7 +1,7 @@
-// CORE LOGIC FREEZE — v1.0
-// Changes require rulebook update
+// CORE ENGINE — RULEBOOK ALIGNED
 
 const GRID_SIZE = 11;
+const MAX_NUMBER = 121;
 
 function initGrid() {
   return Array.from({ length: GRID_SIZE }, () =>
@@ -9,34 +9,37 @@ function initGrid() {
   );
 }
 
+function isValidCoordinate(r, c) {
+  return (
+    Number.isInteger(r) &&
+    Number.isInteger(c) &&
+    r >= 0 &&
+    r < GRID_SIZE &&
+    c >= 0 &&
+    c < GRID_SIZE
+  );
+}
+
 function placeNumber(grid, r, c, number) {
-  if (r < 0 || r >= GRID_SIZE || c < 0 || c >= GRID_SIZE) return false;
-  if (number < 1 || number > 121) return false;
+  if (!isValidCoordinate(r, c)) return false;
+  if (!Number.isInteger(number)) return false;
+  if (number < 1 || number > MAX_NUMBER) return false;
   if (grid[r][c] !== null) return false;
-  if (grid.flat().includes(number)) return false;
+
+  // avoid grid.flat() allocation
+  for (let i = 0; i < GRID_SIZE; i++) {
+    for (let j = 0; j < GRID_SIZE; j++) {
+      if (grid[i][j] === number) return false;
+    }
+  }
 
   grid[r][c] = number;
   return true;
 }
 
-function scanCompletedLines(grid) {
-  const completed = { rows: [], cols: [], diagonals: [] };
-
-  for (let r = 0; r < GRID_SIZE; r++) {
-    if (grid[r].every(v => v !== null)) completed.rows.push(r);
-  }
-
-  for (let c = 0; c < GRID_SIZE; c++) {
-    if (grid.every(row => row[c] !== null)) completed.cols.push(c);
-  }
-
-  if (grid.every((row, i) => row[i] !== null)) completed.diagonals.push("main");
-  if (grid.every((row, i) => row[GRID_SIZE - 1 - i] !== null)) completed.diagonals.push("anti");
-
-  return completed;
-}
-
 function crossNumber(grid, number) {
+  if (!Number.isInteger(number)) return false;
+
   let found = false;
 
   for (let r = 0; r < GRID_SIZE; r++) {
@@ -51,10 +54,54 @@ function crossNumber(grid, number) {
   return found;
 }
 
-function countTicks(scanResult) {
-  return (
-    scanResult.rows.length +
-    scanResult.cols.length +
-    scanResult.diagonals.length
-  );
+function scanCompletedLines(grid) {
+  const completed = { rows: 0, cols: 0, diagonals: 0 };
+
+  for (let r = 0; r < GRID_SIZE; r++) {
+    let full = true;
+    for (let c = 0; c < GRID_SIZE; c++) {
+      if (grid[r][c] !== "X") {
+        full = false;
+        break;
+      }
+    }
+    if (full) completed.rows++;
+  }
+
+  for (let c = 0; c < GRID_SIZE; c++) {
+    let full = true;
+    for (let r = 0; r < GRID_SIZE; r++) {
+      if (grid[r][c] !== "X") {
+        full = false;
+        break;
+      }
+    }
+    if (full) completed.cols++;
+  }
+
+  // main diagonal
+  let mainFull = true;
+  for (let i = 0; i < GRID_SIZE; i++) {
+    if (grid[i][i] !== "X") {
+      mainFull = false;
+      break;
+    }
+  }
+  if (mainFull) completed.diagonals++;
+
+  // anti diagonal
+  let antiFull = true;
+  for (let i = 0; i < GRID_SIZE; i++) {
+    if (grid[i][GRID_SIZE - 1 - i] !== "X") {
+      antiFull = false;
+      break;
+    }
+  }
+  if (antiFull) completed.diagonals++;
+
+  return completed;
+}
+
+function countTicks(result) {
+  return result.rows + result.cols + result.diagonals;
 }

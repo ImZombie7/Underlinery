@@ -1,125 +1,183 @@
-// CENTRALIZED GAME STATE
+// MAIN CONTROLLER — RULEBOOK ALIGNED
+
 const gameState = {
-  phase: "placement",
+  phase: "toss", // "toss" | "placement" | "match" | "gameover"
   currentPlayer: 0,
-  players: [
-    { grid: initGrid(), placementCount: 0, ticks: 0, locked: false },
-    { grid: initGrid(), placementCount: 0, ticks: 0, locked: false }
-  ],
   calledNumbers: [],
-  winner: null
+  winner: null,
+  players: [
+    { grid: initGrid(), ticks: 0, placementCount: 0, locked: false },
+    { grid: initGrid(), ticks: 0, placementCount: 0, locked: false }
+  ]
 };
 
-// RENDERING SYSTEM
-function renderGrid(playerIndex) {
-  const container = document.getElementById(`grid-${playerIndex}`);
-  container.innerHTML = "";
-  const player = gameState.players[playerIndex];
-  const isActive = gameState.currentPlayer === playerIndex;
+const numberInput = document.getElementById("numberInput");
+const actionBtn = document.getElementById("actionBtn");
+const statusText = document.getElementById("status");
+const calledNumbersDiv = document.getElementById("called-numbers");
 
-  for (let r = 0; r < 11; r++) {
-    for (let c = 0; c < 11; c++) {
-      const btn = document.createElement("button");
-      const value = player.grid[r][c];
+// --- TOSS PHASE ---
 
-      // Hidden info
-      if (gameState.phase === "match" && !isActive) {
-        btn.textContent = value === "X" ? "X" : "";
-      } else {
-        btn.textContent = value ?? "";
-      }
-
-      if (gameState.phase === "placement" && isActive && !player.locked) {
-        btn.onclick = () => handlePlacement(r, c);
-      }
-
-      container.appendChild(btn);
-    }
-  }
+function runToss() {
+  const tossWinner = Math.random() < 0.5 ? 0 : 1;
+  gameState.currentPlayer = tossWinner;
+  gameState.phase = "placement";
+  statusText.textContent = `Player ${tossWinner + 1} won toss. Placement begins.`;
 }
 
-function renderAll() {
-  renderGrid(0);
-  renderGrid(1);
+// --- ACTION HANDLER ---
 
-  document.getElementById("ticks-0").textContent =
-    "Ticks: " + gameState.players[0].ticks;
-  document.getElementById("ticks-1").textContent =
-    "Ticks: " + gameState.players[1].ticks;
-  document.getElementById("called-numbers").textContent =
-    "Called: " + gameState.calledNumbers.join(", ");
+actionBtn.addEventListener("click", handleAction);
 
-  if (gameState.phase === "gameover") {
-    alert("Winner: Player " + (gameState.winner + 1));
+function handleAction() {
+  if (gameState.phase === "gameover") return;
+
+  const value = parseInt(numberInput.value);
+  if (!Number.isInteger(value)) return;
+
+  if (gameState.phase === "placement") {
+    handlePlacement(value);
+  } else if (gameState.phase === "match") {
+    handleMatch(value);
   }
+
+  numberInput.value = "";
 }
 
-// PLACEMENT PHASE HANDLER
-function handlePlacement(r, c) {
-  if (gameState.phase !== "placement") return;
+// --- PLACEMENT PHASE ---
 
+function handlePlacement(number) {
   const player = gameState.players[gameState.currentPlayer];
+
   if (player.locked) return;
 
-  const input = prompt("Enter number 1-121:");
-  const num = Number(input);
+  // Placement must be intentional: use selectedCell
+  if (!selectedCell) return;
 
-  if (!Number.isInteger(num) || num < 1 || num > 121) return;
+  const { r, c } = selectedCell;
 
-  const placed = placeNumber(player.grid, r, c, num);
+  const placed = placeNumber(player.grid, r, c, number);
   if (!placed) return;
 
   player.placementCount++;
 
   if (player.placementCount === 121) {
     player.locked = true;
-
-    if (gameState.currentPlayer === 0) {
-      gameState.currentPlayer = 1;
-    } else {
-      gameState.phase = "match";
-      gameState.currentPlayer = 0;
-    }
   }
 
-  renderAll();
+  if (gameState.players.every(p => p.locked)) {
+    gameState.phase = "match";
+    gameState.currentPlayer = 0;
+    statusText.textContent = "Match phase begins.";
+  } else {
+    switchTurn();
+  }
+
+  selectedCell = null;
+  render();
 }
 
-// MATCH PHASE LISTENER
-document.addEventListener("keydown", function (e) {
-  if (e.key !== "Enter") return;
-  if (gameState.phase !== "match") return;
-  if (gameState.phase === "gameover") return;
+// --- MATCH PHASE ---
 
-  handleMatchTurn();
-});
+function handleMatch(number) {
+  if (gameState.calledNumbers.includes(number)) return;
 
-function handleMatchTurn() {
-  const input = prompt("Call a number:");
-  const num = Number(input);
+  gameState.calledNumbers.push(number);
 
-  if (!Number.isInteger(num) || num < 1 || num > 121) return;
-  if (gameState.calledNumbers.includes(num)) return;
-
-  gameState.calledNumbers.push(num);
-
-  gameState.players.forEach((player, index) => {
-    crossNumber(player.grid, num);
-    const scan = scanCompletedLines(player.grid);
-    player.ticks = countTicks(scan);
-
-    if (player.ticks >= 11 && gameState.phase !== "gameover") {
-      gameState.phase = "gameover";
-      gameState.winner = index;
-    }
+  // symmetric crossing
+  gameState.players.forEach(p => {
+    crossNumber(p.grid, number);
   });
 
-  if (gameState.phase !== "gameover") {
-    gameState.currentPlayer = 1 - gameState.currentPlayer;
+  // per-grid tick calculation
+  gameState.players.forEach(p => {
+    const result = scanCompletedLines(p.grid);
+    p.ticks = countTicks(result);
+  });
+
+  updateCalledNumbers();
+
+  // win check (11 required)
+  for (let i = 0; i < 2; i++) {
+    if (gameState.players[i].ticks >= 11) {
+      gameState.phase = "gameover";
+      gameState.winner = i;
+      statusText.textContent = `Player ${i + 1} wins.`;
+      render();
+      return;
+    }
   }
 
-  renderAll();
+  switchTurn();
+  render();
 }
 
-// INITIAL RENDER
-renderAll();
+// --- TURN SWITCH ---
+
+function switchTurn() {
+  gameState.currentPlayer = gameState.currentPlayer === 0 ? 1 : 0;
+  statusText.textContent = `Player ${gameState.currentPlayer + 1}'s turn.`;
+}
+
+// --- RENDER ---
+
+let selectedCell = null;
+
+function render() {
+  gameState.players.forEach((player, index) => {
+    const container = document.getElementById(`grid-${index}`);
+    container.innerHTML = "";
+
+    const isActive = index === gameState.currentPlayer;
+
+    for (let r = 0; r < GRID_SIZE; r++) {
+      for (let c = 0; c < GRID_SIZE; c++) {
+        const cell = document.createElement("div");
+        cell.classList.add("cell");
+
+        const value = player.grid[r][c];
+
+        // Hidden information enforcement
+        if (
+          gameState.phase === "match" &&
+          !isActive &&
+          value !== "X"
+        ) {
+          cell.textContent = "";
+        } else {
+          cell.textContent = value === null ? "" : value;
+        }
+
+        if (value === "X") {
+          cell.classList.add("marked");
+        }
+
+        // placement selection only during placement
+        if (
+          gameState.phase === "placement" &&
+          isActive &&
+          value === null
+        ) {
+          cell.addEventListener("click", () => {
+            selectedCell = { r, c };
+          });
+        }
+
+        container.appendChild(cell);
+      }
+    }
+
+    document.getElementById(`ticks-${index}`).textContent =
+      `Ticks: ${player.ticks}`;
+  });
+}
+
+function updateCalledNumbers() {
+  calledNumbersDiv.textContent =
+    "Called: " + gameState.calledNumbers.join(", ");
+}
+
+// --- INIT ---
+
+runToss();
+render();
