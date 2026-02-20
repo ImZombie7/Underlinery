@@ -160,6 +160,7 @@ function render() {
         ) {
           cell.addEventListener("click", () => {
             selectedCell = { r, c };
+            render();
           });
         }
 
