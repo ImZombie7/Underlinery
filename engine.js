@@ -133,7 +133,7 @@ function scanLines(grid) {
   return ticks;
 }
 
-module.exports = {
+export {
   createInitialState,
   placeNumber,
   callNumber
