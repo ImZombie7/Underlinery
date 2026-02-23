@@ -1,0 +1,13 @@
+Render grid
+
+Handle placement phase
+
+Lock grid
+
+Handle number calls
+
+Detect completed lines
+
+Count ticks
+
+Declare winner

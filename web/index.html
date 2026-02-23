@@ -1,75 +1,44 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Underlinery</title>
-  <style>
-    body {
-      font-family: sans-serif;
-    }
-
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(11, 40px);
-      gap: 4px;
-      margin: 10px;
-    }
-
-    .cell {
-      width: 40px;
-      height: 40px;
-      background: #222;
-      color: white;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      border-radius: 4px;
-      cursor: default;
-    }
-
-    .marked {
-      background: crimson;
-    }
-
-    .hidden {
-      visibility: hidden;
-    }
-
-    .selected {
-      outline: 3px solid lime;
-      outline-offset: -3px;
-    }
-  </style>
+<meta charset="UTF-8" />
+<title>Underlinery</title>
+<style>
+body { background:#111;color:white;text-align:center;font-family:Arial; }
+#grid { display:grid;grid-template-columns:repeat(11,30px);gap:2px;justify-content:center;margin:20px auto; }
+.cell { width:30px;height:30px;background:#222;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:12px; }
+.cell.marked { background:limegreen;color:black; }
+.cell.selected { outline:2px solid yellow; }
+#credit { position:fixed;bottom:8px;right:10px;font-size:12px;opacity:.6; }
+#credit a { color:white;text-decoration:none; }
+</style>
 </head>
 <body>
 
-  <div id="player0-container">
-    <h2>Player 1</h2>
-    <div class="grid" id="grid-0"></div>
-    <div id="ticks-0"></div>
-  </div>
+<h1>Underlinery</h1>
 
-  <hr>
+<div id="auth">
+<input id="email" placeholder="Email" />
+<input id="password" type="password" placeholder="Password" />
+<button id="loginBtn">Login</button>
+<button id="registerBtn">Register</button>
+</div>
 
-  <div id="player1-container">
-    <h2>Player 2</h2>
-    <div class="grid" id="grid-1"></div>
-    <div id="ticks-1"></div>
-  </div>
+<div id="status"></div>
+<div id="grid"></div>
+<div id="ticks"></div>
+<div id="called-numbers"></div>
 
-  <hr>
+<input id="numberInput" type="number" placeholder="Number" />
+<button id="actionBtn">Submit</button>
+<button id="lockBtn">Lock Grid</button>
 
-  <div id="called-numbers"></div>
+<div id="credit">
+<a href="https://github.com/ImZombie7/Underlinery" target="_blank">
+By Nayart The Zombie
+</a>
+</div>
 
-  <hr>
-
-  <div>
-    <input id="numberInput" type="number" min="1" max="121" placeholder="Enter number">
-    <button id="actionBtn">Play</button>
-    <p id="status"></p>
-  </div>
-
-  <script src="logic.js"></script>
-  <script src="main.js"></script>
-
+<script type="module" src="main.js"></script>
 </body>
 </html>

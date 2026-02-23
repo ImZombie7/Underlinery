@@ -1,37 +1,166 @@
-// web/main.js
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.43.0";
 
-const socket = new WebSocket("ws://localhost:8080");
+// =============================
+// SUPABASE CONFIG
+// =============================
 
+const SUPABASE_URL = "https://YOUR_PROJECT_ID.supabase.co";
+const SUPABASE_ANON_KEY = "YOUR_PUBLIC_ANON_KEY";
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// =============================
+// STATE
+// =============================
+
+let socket = null;
+let reconnectAttempts = 0;
+let reconnectTimeout = null;
 let playerIndex = null;
 let gameState = null;
 let selectedCell = null;
+let reconnectToken = localStorage.getItem("reconnectToken") || null;
 
-socket.onmessage = (event) => {
-  const { type, payload } = JSON.parse(event.data);
+// =============================
+// DOM
+// =============================
 
-  if (type === "JOIN_GAME") {
-    playerIndex = payload.playerIndex;
+const gridEl = document.getElementById("grid");
+const ticksEl = document.getElementById("ticks");
+const calledEl = document.getElementById("called-numbers");
+const statusEl = document.getElementById("status");
+const numberInput = document.getElementById("numberInput");
+
+// =============================
+// AUTH FLOW
+// =============================
+
+async function initAuth() {
+  const { data } = await supabase.auth.getSession();
+
+  if (!data.session) {
+    showLogin();
+  } else {
+    connectSocket(data.session.access_token);
   }
 
-  if (type === "GAME_STATE_UPDATE") {
-    gameState = payload;
-    render();
+  // Auto refresh listener
+  supabase.auth.onAuthStateChange((event, session) => {
+    if (event === "SIGNED_OUT") {
+      disconnectSocket();
+      showLogin();
+    }
+
+    if (event === "TOKEN_REFRESHED") {
+      console.log("Token refreshed.");
+      if (session?.access_token) {
+        reconnectWithNewToken(session.access_token);
+      }
+    }
+  });
+}
+
+function showLogin() {
+  statusEl.textContent = "Login required.";
+  // Simple prompt login (replace with modal if desired)
+  const email = prompt("Email:");
+  const password = prompt("Password:");
+
+  if (!email || !password) return;
+
+  supabase.auth.signInWithPassword({ email, password })
+    .then(({ error }) => {
+      if (error) {
+        alert("Login failed.");
+        return;
+      }
+      location.reload();
+    });
+}
+
+// =============================
+// WEBSOCKET
+// =============================
+
+function buildSocketURL(jwt) {
+  const protocol = location.protocol === "https:" ? "wss" : "ws";
+  const host = location.host;
+
+  let url = `${protocol}://${host}?room=default&jwt=${jwt}`;
+
+  if (reconnectToken) {
+    url += `&token=${reconnectToken}`;
   }
 
-  if (type === "GAME_OVER") {
-    alert(`Player ${payload.winner + 1} wins.`);
+  return url;
+}
+
+function connectSocket(jwt) {
+  const socketURL = buildSocketURL(jwt);
+  socket = new WebSocket(socketURL);
+
+  socket.onopen = () => {
+    reconnectAttempts = 0;
+    statusEl.textContent = "Connected.";
+  };
+
+  socket.onmessage = (event) => {
+    const { type, payload } = JSON.parse(event.data);
+
+    if (type === "JOIN_GAME") {
+      playerIndex = payload.playerIndex;
+      reconnectToken = payload.token;
+      localStorage.setItem("reconnectToken", reconnectToken);
+    }
+
+    if (type === "GAME_STATE_UPDATE") {
+      gameState = payload;
+      render();
+    }
+
+    if (type === "ERROR") {
+      alert(payload);
+    }
+  };
+
+  socket.onclose = () => {
+    statusEl.textContent = "Disconnected. Reconnecting...";
+    attemptReconnect(jwt);
+  };
+}
+
+function disconnectSocket() {
+  if (socket) {
+    socket.close();
+    socket = null;
+  }
+}
+
+function attemptReconnect(jwt) {
+  if (reconnectAttempts > 5) {
+    statusEl.textContent = "Connection lost.";
+    return;
   }
 
-  if (type === "ERROR") {
-    alert(payload);
-  }
-};
+  reconnectAttempts++;
+  reconnectTimeout = setTimeout(() => {
+    connectSocket(jwt);
+  }, 2000 * reconnectAttempts);
+}
+
+function reconnectWithNewToken(newJwt) {
+  disconnectSocket();
+  connectSocket(newJwt);
+}
+
+// =============================
+// GAME ACTIONS
+// =============================
 
 document.getElementById("actionBtn").onclick = () => {
-  if (!gameState) return;
-  if (gameState.phase === "gameover") return;
+  if (!gameState || !socket) return;
 
-  const number = parseInt(document.getElementById("numberInput").value);
+  const number = parseInt(numberInput.value);
   if (!Number.isInteger(number)) return;
 
   if (gameState.phase === "placement") {
@@ -55,48 +184,71 @@ document.getElementById("actionBtn").onclick = () => {
   }
 };
 
+document.getElementById("lockBtn").onclick = () => {
+  if (!socket) return;
+  socket.send(JSON.stringify({ type: "LOCK_GRID" }));
+};
+
+// =============================
+// RENDER
+// =============================
+
 function render() {
-  gameState.players.forEach((player, index) => {
-    const container = document.getElementById(`grid-${index}`);
-    container.innerHTML = "";
+  if (!gameState) return;
 
-    const isActive = index === playerIndex;
+  const player = gameState.me;
+  gridEl.innerHTML = "";
 
-    for (let r = 0; r < 11; r++) {
-      for (let c = 0; c < 11; c++) {
-        const cell = document.createElement("div");
-        cell.classList.add("cell");
+  for (let r = 0; r < 11; r++) {
+    for (let c = 0; c < 11; c++) {
+      const cell = document.createElement("div");
+      cell.classList.add("cell");
 
-        const value = player.grid[r][c];
+      const value = player.grid[r][c];
+      cell.textContent = value ?? "";
 
-        if (gameState.phase === "match" &&
-            index !== playerIndex &&
-            value !== "X") {
-          cell.textContent = "";
-        } else {
-          cell.textContent = value === null ? "" : value;
-        }
-
-        if (value === "X") {
-          cell.classList.add("marked");
-        }
-
-        if (gameState.phase === "placement" &&
-            index === playerIndex &&
-            value === null) {
-          cell.onclick = () => {
-            selectedCell = { r, c };
-          };
-        }
-
-        container.appendChild(cell);
+      if (value === "X") {
+        cell.classList.add("marked");
       }
+
+      if (gameState.phase === "placement" && value === null) {
+        cell.onclick = () => {
+          selectedCell = { r, c };
+          render();
+        };
+      }
+
+      if (
+        selectedCell &&
+        selectedCell.r === r &&
+        selectedCell.c === c
+      ) {
+        cell.classList.add("selected");
+      }
+
+      gridEl.appendChild(cell);
     }
+  }
 
-    document.getElementById(`ticks-${index}`).textContent =
-      `Ticks: ${player.ticks}`;
-  });
-
-  document.getElementById("called-numbers").textContent =
+  ticksEl.textContent = `Ticks: ${player.ticks}`;
+  calledEl.textContent =
     "Called: " + gameState.calledNumbers.join(", ");
+
+  if (gameState.phase === "gameover") {
+    statusEl.textContent =
+      gameState.winner === playerIndex
+        ? "You won."
+        : "You lost.";
+  } else {
+    statusEl.textContent =
+      gameState.currentPlayer === playerIndex
+        ? "Your turn."
+        : "Opponent's turn.";
+  }
 }
+
+// =============================
+// INIT
+// =============================
+
+initAuth();
