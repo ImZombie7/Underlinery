@@ -5,6 +5,20 @@ import { fileURLToPath } from "url";
 import { WebSocketServer, WebSocket } from "ws";
 import jwt from "jsonwebtoken";
 import pino from "pino";
+import { jwtVerify, createRemoteJWKSet } from 'jose';
+
+const JWKS = createRemoteJWKSet(
+  new URL('https://YOUR_PROJECT_ID.supabase.co/auth/v1/keys')
+);
+
+async function verifyToken(token) {
+  const { payload } = await jwtVerify(token, JWKS, {
+    issuer: `https://YOUR_PROJECT_ID.supabase.co/auth/v1`,
+    audience: 'authenticated'
+  });
+
+  return payload;
+}
 
 import { getRoom, removeClient } from "./network/roomManager.js";
 import { validateMessage } from "./network/validate.js";
