@@ -5,17 +5,25 @@ import { fileURLToPath } from "url";
 import { WebSocketServer } from "ws";
 import pino from "pino";
 import { jwtVerify, createRemoteJWKSet } from 'jose';
+import { getRoom, removeClient, roomExists } from "./network/roomManager.js";
 
 let activeConnections = 0;
 let totalMessages = 0;
 
+// ================================
+// SUPABASE CONFIG (Server-Side)
+// ================================
+
 const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_JWT_ISSUER = process.env.SUPABASE_JWT_ISSUER;
 
 if (!SUPABASE_URL) {
-  throw new Error("SUPABASE_URL missing");
+  throw new Error("SUPABASE_URL is missing in environment.");
 }
 
-const SUPABASE_JWT_ISSUER = `${SUPABASE_URL}/auth/v1`;
+if (!SUPABASE_JWT_ISSUER) {
+  throw new Error("SUPABASE_JWT_ISSUER is missing in environment.");
+}
 
 const JWKS = createRemoteJWKSet(
   new URL(`${SUPABASE_URL}/auth/v1/keys`)
@@ -24,15 +32,13 @@ const JWKS = createRemoteJWKSet(
 async function verifyToken(token) {
   const { payload } = await jwtVerify(token, JWKS, {
     issuer: SUPABASE_JWT_ISSUER,
-    audience: 'authenticated',
-    algorithms: ['RS256']
+    audience: "authenticated",
+    algorithms: ["RS256"]
   });
 
   return payload;
-
 }
 
-import { getRoom, removeClient } from "./network/roomManager.js";
 import { validateMessage } from "./network/validate.js";
 import { placeNumber, callNumber, lockGrid, performToss } from "./engine/rules.js";
 import { RECONNECT_GRACE_MS } from "./engine/state.js";
@@ -66,6 +72,17 @@ process.on("SIGTERM", () => {
 
 app.use(express.static(path.join(__dirname, "../web")));
 
+function scheduleBroadcast(room) {
+  if (room.pendingBroadcast) return;
+
+  room.pendingBroadcast = true;
+
+  setImmediate(() => {
+    room.pendingBroadcast = false;
+    broadcastState(room);
+  });
+}
+
 server.on("upgrade", async (req, socket, head) => {
   if (!req.url.startsWith("/ws")) {
     baseLogger.warn("Unauthorized upgrade attempt");
@@ -85,7 +102,12 @@ server.on("upgrade", async (req, socket, head) => {
 
   let payload;
   try {
-    payload = await verifyToken(token);
+    payload = await Promise.race([
+      verifyToken(token),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("Auth timeout")), 5000)
+      )
+    ]);
   } catch {
     baseLogger.warn("Unauthorized upgrade attempt");
     socket.destroy();
@@ -112,6 +134,11 @@ wss.on("connection", (ws, req) => {
   ws.messageCount = 0;
 
   const url = new URL(req.url, `http://${req.headers.host}`);
+  const token = url.searchParams.get("token");
+
+  ws.close(1008, "Missing token");
+  return;
+
   const roomId = url.searchParams.get("room") || "ranked";
 
   const userId = req.user.sub; // 🔥 already verified in upgrade
@@ -120,6 +147,7 @@ wss.on("connection", (ws, req) => {
   roomLogger.info({ userId }, "Client connected");
 
   const room = getRoom(roomId);
+  room.lastActivityAt = Date.now();
   let playerIndex;
 
   if (room.userMap.has(userId)) {
@@ -144,6 +172,8 @@ wss.on("connection", (ws, req) => {
   sendState(ws, room);
 
   ws.on("message", raw => {
+
+    room.lastActivityAt = Date.now();
 
     totalMessages++;
 
@@ -181,10 +211,12 @@ wss.on("connection", (ws, req) => {
       typeof msg.payload?.version !== "number" ||
       msg.payload.version !== room.gameState.version
      ) {
+      sendState(ws, room); // force resync
       return; // stale action rejected
     }
 
     const index = room.playerMap.get(ws);
+    if (typeof index !== "number") return;
     let success = false;
 
     if (msg.type === "PLACE_NUMBER") {
@@ -209,9 +241,9 @@ wss.on("connection", (ws, req) => {
     }
 
     if (success) {
-      room.gameState.version++; // 🔥 version increment
-      broadcastState(room);
+      scheduleBroadcast(room);
     }
+    
   });
 
   ws.on("close", () => {
@@ -220,11 +252,22 @@ wss.on("connection", (ws, req) => {
     baseLogger.info({ activeConnections }, "Client disconnected");
 
     const index = room.playerMap.get(ws);
-    if (index === undefined) return;
+    if (typeof index !== "number") return;
+    
+
+
+    if (room.disconnectTimers.has(index)) {
+      clearTimeout(room.disconnectTimers.get(index));
+    }
 
     room.disconnectTimers.set(
       index,
       setTimeout(() => {
+        if (!roomExists(roomId)) return;
+
+        const room = getRoom(roomId);
+        if (!roomExists(roomId)) return;
+
         if (room.gameState.phase !== "gameover") {
           room.gameState.phase = "gameover";
           room.gameState.winner = 1 - index;
@@ -234,12 +277,6 @@ wss.on("connection", (ws, req) => {
     );
 
     removeClient(roomId, ws);
-
-    // ✅ Room GC
-    if (room.clients.size === 0) {
-      baseLogger.info({ roomId }, "Room empty. Cleaning up.");
-      // Ideally deleteRoom(roomId) here
-    }
   });
 });
 
@@ -266,7 +303,11 @@ function sendState(ws, room) {
 
 function broadcastState(room) {
   room.clients.forEach(ws => {
-    if (ws.readyState === WebSocket.OPEN)
-      sendState(ws, room);
+    if (ws.readyState === WebSocket.OPEN)     
+      try {
+        sendState(ws, room);
+      } catch (err) {
+        baseLogger.error(err);
+      }
   });
 }

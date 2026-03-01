@@ -1,9 +1,17 @@
 import { GRID_SIZE, MAX_NUMBER } from "./state.js";
 
+/*
+  Engine Layer
+  - Owns game state mutation
+  - Owns version increments
+  - Does NOT know about rooms or sockets
+*/
+
 export function placeNumber(state, playerIndex, r, c, number) {
   if (state.phase !== "placement") return false;
 
   const player = state.players[playerIndex];
+  if (!player) return false;
 
   if (!Number.isInteger(number) || number < 1 || number > MAX_NUMBER)
     return false;
@@ -20,6 +28,7 @@ export function placeNumber(state, playerIndex, r, c, number) {
   player.grid[r][c] = number;
   player.usedNumbers.add(number);
   player.placementCount++;
+
   state.version++;
   return true;
 }
@@ -28,7 +37,7 @@ export function lockGrid(state, playerIndex) {
   if (state.phase !== "placement") return false;
 
   const player = state.players[playerIndex];
-  if (player.locked) return false;
+  if (!player || player.locked) return false;
   if (player.placementCount !== MAX_NUMBER) return false;
 
   player.locked = true;
@@ -46,6 +55,7 @@ export function performToss(state) {
 
   state.currentPlayer = Math.random() < 0.5 ? 0 : 1;
   state.phase = "match";
+
   state.version++;
   return true;
 }
@@ -53,24 +63,27 @@ export function performToss(state) {
 export function callNumber(state, playerIndex, number) {
   if (state.phase !== "match") return false;
   if (state.currentPlayer !== playerIndex) return false;
+
   if (!Number.isInteger(number) || number < 1 || number > MAX_NUMBER)
     return false;
+
   if (state.calledNumbers.has(number)) return false;
 
   state.calledNumbers.add(number);
 
-  state.players.forEach(p => {
+  for (const player of state.players) {
     for (let r = 0; r < GRID_SIZE; r++) {
       for (let c = 0; c < GRID_SIZE; c++) {
-        if (p.grid[r][c] === number) {
-          p.grid[r][c] = "X";
+        if (player.grid[r][c] === number) {
+          player.grid[r][c] = "X";
         }
       }
     }
-    p.ticks = scanLines(p.grid);
-  });
+    player.ticks = scanLines(player.grid);
+  }
 
-  for (let i = 0; i < 2; i++) {
+  // Win detection
+  for (let i = 0; i < state.players.length; i++) {
     if (state.players[i].ticks >= 11) {
       state.phase = "gameover";
       state.winner = i;
@@ -88,9 +101,12 @@ export function callNumber(state, playerIndex, number) {
 function scanLines(grid) {
   let ticks = 0;
 
-  for (let r = 0; r < GRID_SIZE; r++)
+  // Rows
+  for (let r = 0; r < GRID_SIZE; r++) {
     if (grid[r].every(v => v === "X")) ticks++;
+  }
 
+  // Columns
   for (let c = 0; c < GRID_SIZE; c++) {
     let full = true;
     for (let r = 0; r < GRID_SIZE; r++) {
@@ -102,7 +118,10 @@ function scanLines(grid) {
     if (full) ticks++;
   }
 
-  let main = true, anti = true;
+  // Diagonals
+  let main = true;
+  let anti = true;
+
   for (let i = 0; i < GRID_SIZE; i++) {
     if (grid[i][i] !== "X") main = false;
     if (grid[i][GRID_SIZE - 1 - i] !== "X") anti = false;

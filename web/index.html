@@ -1,44 +1,162 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
 <meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Underlinery</title>
+
 <style>
-body { background:#111;color:white;text-align:center;font-family:Arial; }
-#grid { display:grid;grid-template-columns:repeat(11,30px);gap:2px;justify-content:center;margin:20px auto; }
-.cell { width:30px;height:30px;background:#222;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:12px; }
-.cell.marked { background:limegreen;color:black; }
-.cell.selected { outline:2px solid yellow; }
-#credit { position:fixed;bottom:8px;right:10px;font-size:12px;opacity:.6; }
-#credit a { color:white;text-decoration:none; }
+:root {
+  --bg: #0f0f0f;
+  --panel: #1a1a1a;
+  --cell: #222;
+  --accent: limegreen;
+  --highlight: gold;
+  --danger: #ff4d4d;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: white;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
+  text-align: center;
+}
+
+h1 {
+  margin-top: 20px;
+  letter-spacing: 2px;
+}
+
+#auth {
+  margin-top: 20px;
+}
+
+input {
+  padding: 6px;
+  margin: 4px;
+  background: var(--panel);
+  border: 1px solid #333;
+  color: white;
+}
+
+button {
+  padding: 6px 10px;
+  margin: 4px;
+  border: none;
+  background: #333;
+  color: white;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #444;
+}
+
+button:disabled {
+  background: #222;
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+#status {
+  margin-top: 15px;
+  font-weight: bold;
+}
+
+#grid {
+  display: grid;
+  grid-template-columns: repeat(11, 32px);
+  gap: 3px;
+  justify-content: center;
+  margin: 25px auto;
+}
+
+.cell {
+  width: 32px;
+  height: 32px;
+  background: var(--cell);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  cursor: pointer;
+  transition: 0.1s;
+}
+
+.cell:hover {
+  background: #2d2d2d;
+}
+
+.cell.marked {
+  background: var(--accent);
+  color: black;
+}
+
+.cell.selected {
+  outline: 2px solid var(--highlight);
+}
+
+#controls {
+  margin-top: 15px;
+}
+
+#ticks,
+#called-numbers {
+  margin-top: 8px;
+  font-size: 14px;
+}
+
+#credit {
+  position: fixed;
+  bottom: 8px;
+  right: 10px;
+  font-size: 12px;
+  opacity: 0.5;
+}
+
+#credit a {
+  color: white;
+  text-decoration: none;
+}
 </style>
 </head>
+
 <body>
 
 <h1>Underlinery</h1>
 
+<!-- AUTH PANEL -->
 <div id="auth">
-<input id="email" placeholder="Email" />
-<input id="password" type="password" placeholder="Password" />
-<button id="loginBtn">Login</button>
-<button id="registerBtn">Register</button>
+  <input id="email" type="email" placeholder="Email" />
+  <input id="password" type="password" placeholder="Password" />
+  <br />
+  <button id="loginBtn">Login</button>
+  <button id="registerBtn">Register</button>
 </div>
 
 <div id="status"></div>
+
+<!-- GAME BOARD -->
 <div id="grid"></div>
+
 <div id="ticks"></div>
 <div id="called-numbers"></div>
 
-<input id="numberInput" type="number" placeholder="Number" />
-<button id="actionBtn">Submit</button>
-<button id="lockBtn">Lock Grid</button>
+<!-- GAME CONTROLS -->
+<div id="controls">
+  <input id="numberInput" type="number" min="1" max="121" placeholder="Number" />
+  <button id="actionBtn">Submit</button>
+  <button id="lockBtn">Lock Grid</button>
+</div>
 
 <div id="credit">
-<a href="https://github.com/ImZombie7/Underlinery" target="_blank">
-By Nayart The Zombie
-</a>
+  <a href="https://github.com/ImZombie7/Underlinery" target="_blank">
+    By Nayart The Zombie
+  </a>
 </div>
 
 <script type="module" src="main.js"></script>
+
 </body>
 </html>
