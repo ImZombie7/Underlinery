@@ -2,30 +2,42 @@ import express from "express";
 import http from "http";
 import path from "path";
 import { fileURLToPath } from "url";
-import { WebSocketServer, WebSocket } from "ws";
-import jwt from "jsonwebtoken";
+import { WebSocketServer } from "ws";
 import pino from "pino";
 import { jwtVerify, createRemoteJWKSet } from 'jose';
 
+let activeConnections = 0;
+let totalMessages = 0;
+
+const SUPABASE_URL = process.env.SUPABASE_URL;
+
+if (!SUPABASE_URL) {
+  throw new Error("SUPABASE_URL missing");
+}
+
+const SUPABASE_JWT_ISSUER = `${SUPABASE_URL}/auth/v1`;
+
 const JWKS = createRemoteJWKSet(
-  new URL('https://YOUR_PROJECT_ID.supabase.co/auth/v1/keys')
+  new URL(`${SUPABASE_URL}/auth/v1/keys`)
 );
 
 async function verifyToken(token) {
   const { payload } = await jwtVerify(token, JWKS, {
-    issuer: `https://YOUR_PROJECT_ID.supabase.co/auth/v1`,
-    audience: 'authenticated'
+    issuer: SUPABASE_JWT_ISSUER,
+    audience: 'authenticated',
+    algorithms: ['RS256']
   });
 
   return payload;
+
 }
 
 import { getRoom, removeClient } from "./network/roomManager.js";
 import { validateMessage } from "./network/validate.js";
 import { placeNumber, callNumber, lockGrid, performToss } from "./engine/rules.js";
-import { TURN_TIME_MS, RECONNECT_GRACE_MS } from "./engine/state.js";
+import { RECONNECT_GRACE_MS } from "./engine/state.js";
 
-const logger = pino();
+const baseLogger = pino();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PORT = process.env.PORT || 5000;
@@ -34,41 +46,94 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocketServer({ noServer: true });
 
-app.use(express.static(path.join(__dirname, "../web")));
-
-function verifyJWT(token) {
-  try {
-    return jwt.verify(token, process.env.SUPABASE_JWT_SECRET);
-  } catch {
-    return null;
-  }
+function heartbeat() {
+  this.isAlive = true;
 }
 
-server.on("upgrade", (req, socket, head) => {
+const heartbeatInterval = setInterval(() => {
+  wss.clients.forEach(ws => {
+    if (!ws.isAlive) return ws.terminate();
+    ws.isAlive = false;
+    ws.ping();
+  });
+}, 30000);
+
+process.on("SIGTERM", () => {
+  baseLogger.info("Shutting down gracefully...");
+  wss.clients.forEach(ws => ws.close(1001, "Server shutting down"));
+  server.close(() => process.exit(0));
+});
+
+app.use(express.static(path.join(__dirname, "../web")));
+
+server.on("upgrade", async (req, socket, head) => {
+  if (!req.url.startsWith("/ws")) {
+    baseLogger.warn("Unauthorized upgrade attempt");
+    socket.destroy();
+    return;
+  }
+
+  const authHeader = req.headers['authorization'];
+
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    baseLogger.warn("Unauthorized upgrade attempt");
+    socket.destroy(); // 401 equivalent
+    return;
+  }
+
+  const token = authHeader.split(" ")[1];
+
+  let payload;
+  try {
+    payload = await verifyToken(token);
+  } catch {
+    baseLogger.warn("Unauthorized upgrade attempt");
+    socket.destroy();
+    return;
+  }
+
+  // attach auth to request for later use
+  req.user = payload;
+
   wss.handleUpgrade(req, socket, head, ws => {
     wss.emit("connection", ws, req);
   });
 });
 
 wss.on("connection", (ws, req) => {
+
+  activeConnections++;
+  baseLogger.info({ activeConnections }, "Client connected");
+
+  ws.isAlive = true;
+  ws.on("pong", heartbeat);
+
+  ws.lastMessageTime = 0;
+  ws.messageCount = 0;
+
   const url = new URL(req.url, `http://${req.headers.host}`);
   const roomId = url.searchParams.get("room") || "ranked";
-  const token = url.searchParams.get("token");
 
-  if (!token) return ws.close();
+  const userId = req.user.sub; // 🔥 already verified in upgrade
 
-  const decoded = verifyJWT(token);
-  if (!decoded) return ws.close();
+  const roomLogger = baseLogger.child({ roomId });
+  roomLogger.info({ userId }, "Client connected");
 
-  const userId = decoded.sub;
   const room = getRoom(roomId);
-
   let playerIndex;
 
   if (room.userMap.has(userId)) {
     playerIndex = room.userMap.get(userId);
+
+    if (room.disconnectTimers.has(playerIndex)) {
+      clearTimeout(room.disconnectTimers.get(playerIndex));
+      room.disconnectTimers.delete(playerIndex);
+    }
+
   } else {
-    if (room.userMap.size >= 2) return ws.close();
+    if (room.userMap.size >= 2)
+      return ws.close(1008, "Room full");
+
     playerIndex = room.userMap.size;
     room.userMap.set(userId, playerIndex);
   }
@@ -79,15 +144,57 @@ wss.on("connection", (ws, req) => {
   sendState(ws, room);
 
   ws.on("message", raw => {
+
+    totalMessages++;
+
+    if (totalMessages % 100 === 0) {
+      baseLogger.info({ totalMessages }, "Message milestone reached");
+    }
+
+    const now = Date.now();
+
+    if (now - ws.lastMessageTime < 50) {
+      ws.messageCount++;
+
+      if (ws.messageCount > 10) {
+        baseLogger.warn({
+          userId,
+          roomId,
+          ip: req.socket.remoteAddress
+        }, "Rate limit exceeded");
+
+        ws.close(1008, "Rate limit exceeded");
+        return;
+      }
+
+    } else {
+      ws.messageCount = 0;
+    }  
+
+    ws.lastMessageTime = now;
+
     const msg = validateMessage(raw.toString());
     if (!msg) return;
+
+    // ✅ Version protection AFTER msg exists
+    if (
+      typeof msg.payload?.version !== "number" ||
+      msg.payload.version !== room.gameState.version
+     ) {
+      return; // stale action rejected
+    }
 
     const index = room.playerMap.get(ws);
     let success = false;
 
     if (msg.type === "PLACE_NUMBER") {
-      success = placeNumber(room.gameState, index,
-        msg.payload.r, msg.payload.c, msg.payload.number);
+      success = placeNumber(
+        room.gameState,
+        index,
+        msg.payload.r,
+        msg.payload.c,
+        msg.payload.number
+      );
     }
 
     if (msg.type === "LOCK_GRID") {
@@ -101,13 +208,22 @@ wss.on("connection", (ws, req) => {
       success = callNumber(room.gameState, index, msg.payload.number);
     }
 
-    if (success) broadcastState(room);
+    if (success) {
+      room.gameState.version++; // 🔥 version increment
+      broadcastState(room);
+    }
   });
 
   ws.on("close", () => {
-    const index = room.playerMap.get(ws);
 
-    room.disconnectTimers.set(index,
+    activeConnections--;
+    baseLogger.info({ activeConnections }, "Client disconnected");
+
+    const index = room.playerMap.get(ws);
+    if (index === undefined) return;
+
+    room.disconnectTimers.set(
+      index,
       setTimeout(() => {
         if (room.gameState.phase !== "gameover") {
           room.gameState.phase = "gameover";
@@ -118,11 +234,17 @@ wss.on("connection", (ws, req) => {
     );
 
     removeClient(roomId, ws);
+
+    // ✅ Room GC
+    if (room.clients.size === 0) {
+      baseLogger.info({ roomId }, "Room empty. Cleaning up.");
+      // Ideally deleteRoom(roomId) here
+    }
   });
 });
 
-server.listen(PORT, () => {
-  logger.info(`Server running on ${PORT}`);
+server.listen(PORT, () => {  
+  baseLogger.info(`Server running on ${PORT}`);
 });
 
 function sendState(ws, room) {
@@ -136,7 +258,8 @@ function sendState(ws, room) {
       calledNumbers: [...room.gameState.calledNumbers],
       me: room.gameState.players[index],
       winner: room.gameState.winner,
-      version: room.gameState.version
+      version: room.gameState.version,
+      playerIndex: index
     }
   }));
 }
