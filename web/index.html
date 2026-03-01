@@ -128,8 +128,20 @@ button:disabled {
 
 <!-- AUTH PANEL -->
 <div id="auth">
-  <input id="email" type="email" placeholder="Email" />
-  <input id="password" type="password" placeholder="Password" />
+  <input 
+    id="email" 
+    type="email" 
+    placeholder="Email"
+    autocomplete="email"
+  />
+
+  <input 
+    id="password" 
+    type="password" 
+    placeholder="Password"
+    autocomplete="current-password"
+  />
+  
   <br />
   <button id="loginBtn">Login</button>
   <button id="registerBtn">Register</button>
