@@ -84,11 +84,9 @@ function connectSocket(jwt) {
   const protocol = location.protocol === "https:" ? "wss" : "ws";
   const host = location.host;
 
-  socket = new WebSocket(`${protocol}://${host}/ws?room=ranked&jwt=${jwt}`);
-    headers: {
-      Authorization: `Bearer ${jwt}`
-    }
-  };
+  socket = new WebSocket(
+    `${protocol}://${host}/ws?room=ranked&token=${encodeURIComponent(jwt)}`
+  );
 
   socket.onopen = () => {
     reconnectAttempts = 0;
@@ -109,6 +107,7 @@ function connectSocket(jwt) {
     statusEl.textContent = "Disconnected. Reconnecting...";
     attemptReconnect();
   };
+}
 
 function disconnectSocket() {
   if (socket) {

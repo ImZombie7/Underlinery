@@ -2,7 +2,7 @@ import express from "express";
 import http from "http";
 import path from "path";
 import { fileURLToPath } from "url";
-import { WebSocketServer } from "ws";
+import { WebSocketServer, WebSocket } from "ws";
 import pino from "pino";
 import { jwtVerify, createRemoteJWKSet } from 'jose';
 import { getRoom, removeClient, roomExists } from "./network/roomManager.js";
@@ -85,36 +85,26 @@ function scheduleBroadcast(room) {
 
 server.on("upgrade", async (req, socket, head) => {
   if (!req.url.startsWith("/ws")) {
-    baseLogger.warn("Unauthorized upgrade attempt");
     socket.destroy();
     return;
   }
 
-  const authHeader = req.headers['authorization'];
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const token = url.searchParams.get("token");
 
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    baseLogger.warn("Unauthorized upgrade attempt");
-    socket.destroy(); // 401 equivalent
+  if (!token) {
+    socket.destroy();
     return;
   }
-
-  const token = authHeader.split(" ")[1];
 
   let payload;
   try {
-    payload = await Promise.race([
-      verifyToken(token),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("Auth timeout")), 5000)
-      )
-    ]);
+    payload = await verifyToken(token);
   } catch {
-    baseLogger.warn("Unauthorized upgrade attempt");
     socket.destroy();
     return;
   }
 
-  // attach auth to request for later use
   req.user = payload;
 
   wss.handleUpgrade(req, socket, head, ws => {
@@ -134,11 +124,6 @@ wss.on("connection", (ws, req) => {
   ws.messageCount = 0;
 
   const url = new URL(req.url, `http://${req.headers.host}`);
-  const token = url.searchParams.get("token");
-
-  ws.close(1008, "Missing token");
-  return;
-
   const roomId = url.searchParams.get("room") || "ranked";
 
   const userId = req.user.sub; // 🔥 already verified in upgrade
