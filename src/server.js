@@ -2,46 +2,23 @@ import express from "express";
 import http from "http";
 import path from "path";
 import { fileURLToPath } from "url";
-import { WebSocketServer, WebSocket } from "ws";
+import { WebSocketServer } from "ws";
 import pino from "pino";
-import { jwtVerify, createRemoteJWKSet } from 'jose';
+import { jwtVerify, createRemoteJWKSet } from "jose";
+
 import { getRoom, removeClient, roomExists } from "./network/roomManager.js";
-
-let activeConnections = 0;
-let totalMessages = 0;
-
-// ================================
-// SUPABASE CONFIG (Server-Side)
-// ================================
-
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_JWT_ISSUER = process.env.SUPABASE_JWT_ISSUER;
-
-if (!SUPABASE_URL) {
-  throw new Error("SUPABASE_URL is missing in environment.");
-}
-
-if (!SUPABASE_JWT_ISSUER) {
-  throw new Error("SUPABASE_JWT_ISSUER is missing in environment.");
-}
-
-const JWKS = createRemoteJWKSet(
-  new URL(`${SUPABASE_URL}/auth/v1/keys`)
-);
-
-async function verifyToken(token) {
-  const { payload } = await jwtVerify(token, JWKS, {
-    issuer: SUPABASE_JWT_ISSUER,
-    audience: "authenticated",
-    algorithms: ["RS256"]
-  });
-
-  return payload;
-}
-
 import { validateMessage } from "./network/validate.js";
-import { placeNumber, callNumber, lockGrid, performToss } from "./engine/rules.js";
+import {
+  placeNumber,
+  callNumber,
+  lockGrid,
+  performToss
+} from "./engine/rules.js";
 import { RECONNECT_GRACE_MS } from "./engine/state.js";
+
+/* ================================
+   Basic Setup
+================================ */
 
 const baseLogger = pino();
 const __filename = fileURLToPath(import.meta.url);
@@ -51,6 +28,42 @@ const PORT = process.env.PORT || 5000;
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocketServer({ noServer: true });
+
+let activeConnections = 0;
+let totalMessages = 0;
+
+/* ================================
+   Supabase JWT Verification
+================================ */
+
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_JWT_ISSUER = process.env.SUPABASE_JWT_ISSUER;
+
+if (!SUPABASE_URL) throw new Error("SUPABASE_URL missing.");
+if (!SUPABASE_JWT_ISSUER) throw new Error("SUPABASE_JWT_ISSUER missing.");
+
+const JWKS = createRemoteJWKSet(
+  new URL("/auth/v1/keys", SUPABASE_URL)
+);
+
+async function verifyToken(token) {
+  const { payload } = await jwtVerify(token, JWKS, {
+    issuer: SUPABASE_JWT_ISSUER,
+    audience: "authenticated",
+    algorithms: ["RS256"]
+  });
+  return payload;
+}
+
+/* ================================
+   Static Frontend (Vite dist)
+================================ */
+
+app.use(express.static(path.join(__dirname, "../dist")));
+
+/* ================================
+   Heartbeat
+================================ */
 
 function heartbeat() {
   this.isAlive = true;
@@ -64,24 +77,28 @@ const heartbeatInterval = setInterval(() => {
   });
 }, 30000);
 
-process.on("SIGTERM", () => {
+/* ================================
+   Graceful Shutdown
+================================ */
+
+const shutdown = () => {
   baseLogger.info("Shutting down gracefully...");
-  wss.clients.forEach(ws => ws.close(1001, "Server shutting down"));
+
+  clearInterval(heartbeatInterval);
+
+  wss.clients.forEach(ws =>
+    ws.close(1001, "Server shutting down")
+  );
+
   server.close(() => process.exit(0));
-});
+};
 
-app.use(express.static(path.join(__dirname, "../web")));
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);
 
-function scheduleBroadcast(room) {
-  if (room.pendingBroadcast) return;
-
-  room.pendingBroadcast = true;
-
-  setImmediate(() => {
-    room.pendingBroadcast = false;
-    broadcastState(room);
-  });
-}
+/* ================================
+   WebSocket Upgrade
+================================ */
 
 server.on("upgrade", async (req, socket, head) => {
   if (!req.url.startsWith("/ws")) {
@@ -112,8 +129,11 @@ server.on("upgrade", async (req, socket, head) => {
   });
 });
 
-wss.on("connection", (ws, req) => {
+/* ================================
+   WebSocket Connection
+================================ */
 
+wss.on("connection", (ws, req) => {
   activeConnections++;
   baseLogger.info({ activeConnections }, "Client connected");
 
@@ -125,14 +145,11 @@ wss.on("connection", (ws, req) => {
 
   const url = new URL(req.url, `http://${req.headers.host}`);
   const roomId = url.searchParams.get("room") || "ranked";
-
-  const userId = req.user.sub; // 🔥 already verified in upgrade
-
-  const roomLogger = baseLogger.child({ roomId });
-  roomLogger.info({ userId }, "Client connected");
+  const userId = req.user.sub;
 
   const room = getRoom(roomId);
   room.lastActivityAt = Date.now();
+
   let playerIndex;
 
   if (room.userMap.has(userId)) {
@@ -156,52 +173,41 @@ wss.on("connection", (ws, req) => {
 
   sendState(ws, room);
 
+  /* ================================
+     Message Handling
+  ================================= */
+
   ws.on("message", raw => {
-
     room.lastActivityAt = Date.now();
-
     totalMessages++;
-
-    if (totalMessages % 100 === 0) {
-      baseLogger.info({ totalMessages }, "Message milestone reached");
-    }
 
     const now = Date.now();
 
+    // Basic rate limiting
     if (now - ws.lastMessageTime < 50) {
       ws.messageCount++;
-
-      if (ws.messageCount > 10) {
-        baseLogger.warn({
-          userId,
-          roomId,
-          ip: req.socket.remoteAddress
-        }, "Rate limit exceeded");
-
-        ws.close(1008, "Rate limit exceeded");
-        return;
-      }
-
+      if (ws.messageCount > 10)
+        return ws.close(1008, "Rate limit exceeded");
     } else {
       ws.messageCount = 0;
-    }  
+    }
 
     ws.lastMessageTime = now;
 
     const msg = validateMessage(raw.toString());
     if (!msg) return;
 
-    // ✅ Version protection AFTER msg exists
     if (
       typeof msg.payload?.version !== "number" ||
       msg.payload.version !== room.gameState.version
-     ) {
-      sendState(ws, room); // force resync
-      return; // stale action rejected
+    ) {
+      sendState(ws, room);
+      return;
     }
 
     const index = room.playerMap.get(ws);
     if (typeof index !== "number") return;
+
     let success = false;
 
     if (msg.type === "PLACE_NUMBER") {
@@ -222,28 +228,29 @@ wss.on("connection", (ws, req) => {
     }
 
     if (msg.type === "CALL_NUMBER") {
-      success = callNumber(room.gameState, index, msg.payload.number);
+      success = callNumber(
+        room.gameState,
+        index,
+        msg.payload.number
+      );
     }
 
-    if (success) {
-      scheduleBroadcast(room);
-    }
-    
+    if (success) broadcastState(room);
   });
 
-  ws.on("close", () => {
+  /* ================================
+     Disconnect Handling
+  ================================= */
 
+  ws.on("close", () => {
     activeConnections--;
     baseLogger.info({ activeConnections }, "Client disconnected");
 
     const index = room.playerMap.get(ws);
     if (typeof index !== "number") return;
-    
 
-
-    if (room.disconnectTimers.has(index)) {
+    if (room.disconnectTimers.has(index))
       clearTimeout(room.disconnectTimers.get(index));
-    }
 
     room.disconnectTimers.set(
       index,
@@ -251,7 +258,6 @@ wss.on("connection", (ws, req) => {
         if (!roomExists(roomId)) return;
 
         const room = getRoom(roomId);
-        if (!roomExists(roomId)) return;
 
         if (room.gameState.phase !== "gameover") {
           room.gameState.phase = "gameover";
@@ -265,9 +271,9 @@ wss.on("connection", (ws, req) => {
   });
 });
 
-server.listen(PORT, () => {  
-  baseLogger.info(`Server running on ${PORT}`);
-});
+/* ================================
+   State Broadcasting
+================================ */
 
 function sendState(ws, room) {
   const index = room.playerMap.get(ws);
@@ -288,11 +294,20 @@ function sendState(ws, room) {
 
 function broadcastState(room) {
   room.clients.forEach(ws => {
-    if (ws.readyState === WebSocket.OPEN)     
+    if (ws.readyState === 1) {
       try {
         sendState(ws, room);
       } catch (err) {
         baseLogger.error(err);
       }
+    }
   });
 }
+
+/* ================================
+   Start Server
+================================ */
+
+server.listen(PORT, () => {
+  baseLogger.info(`Server running on ${PORT}`);
+});
