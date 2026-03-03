@@ -1,11 +1,11 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7";
 
 // =============================
 // SUPABASE CONFIG
 // =============================
 
 const SUPABASE_URL = "https://umdqileggszqlpjjfxvz.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVtZHFpbGVnZ3N6cWxwampmeHZ6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE4NTA4MjksImV4cCI6MjA4NzQyNjgyOX0.K_rRlUh5dnPpNzpSDEu3hB1__mLTkoDRy7o31z5GjcI"; // NOT service role
+const SUPABASE_ANON_KEY = "YOUR_PUBLIC_ANON_KEY";
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -24,6 +24,12 @@ let currentJwt = null;
 // DOM
 // =============================
 
+const authPanel = document.getElementById("auth");
+const emailInput = document.getElementById("email");
+const passwordInput = document.getElementById("password");
+const loginBtn = document.getElementById("loginBtn");
+const registerBtn = document.getElementById("registerBtn");
+
 const gridEl = document.getElementById("grid");
 const ticksEl = document.getElementById("ticks");
 const calledEl = document.getElementById("called-numbers");
@@ -31,50 +37,74 @@ const statusEl = document.getElementById("status");
 const numberInput = document.getElementById("numberInput");
 
 // =============================
-// AUTH FLOW
+// AUTH
 // =============================
 
 async function initAuth() {
   const { data } = await supabase.auth.getSession();
 
   if (!data.session) {
-    showLogin();
+    showAuth();
     return;
   }
 
-  currentJwt = data.session.access_token;
+  onAuthenticated(data.session);
+}
+
+function showAuth() {
+  authPanel.style.display = "block";
+  statusEl.textContent = "Login or register to continue.";
+}
+
+function hideAuth() {
+  authPanel.style.display = "none";
+}
+
+function onAuthenticated(session) {
+  currentJwt = session.access_token;
+  hideAuth();
   connectSocket(currentJwt);
+}
 
-  supabase.auth.onAuthStateChange((event, session) => {
-    if (event === "SIGNED_OUT") {
-      disconnectSocket();
-      showLogin();
-    }
-
-    if (event === "TOKEN_REFRESHED" && session?.access_token) {
-      currentJwt = session.access_token;
-      reconnectWithNewToken(currentJwt);
-    }
+loginBtn.onclick = async () => {
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email: emailInput.value.trim(),
+    password: passwordInput.value.trim()
   });
-}
 
-function showLogin() {
-  statusEl.textContent = "Login required.";
+  if (error) {
+    alert(error.message);
+    return;
+  }
 
-  const email = prompt("Email:");
-  const password = prompt("Password:");
+  onAuthenticated(data.session);
+};
 
-  if (!email || !password) return;
+registerBtn.onclick = async () => {
+  const { error } = await supabase.auth.signUp({
+    email: emailInput.value.trim(),
+    password: passwordInput.value.trim()
+  });
 
-  supabase.auth.signInWithPassword({ email, password })
-    .then(({ error }) => {
-      if (error) {
-        alert("Login failed.");
-        return;
-      }
-      location.reload();
-    });
-}
+  if (error) {
+    alert(error.message);
+    return;
+  }
+
+  alert("Check your email to confirm registration.");
+};
+
+supabase.auth.onAuthStateChange((event, session) => {
+  if (event === "SIGNED_OUT") {
+    disconnectSocket();
+    showAuth();
+  }
+
+  if (event === "TOKEN_REFRESHED" && session?.access_token) {
+    currentJwt = session.access_token;
+    reconnectWithNewToken(currentJwt);
+  }
+});
 
 // =============================
 // WEBSOCKET
@@ -138,34 +168,24 @@ function reconnectWithNewToken(newJwt) {
 // =============================
 
 document.getElementById("actionBtn").onclick = () => {
-  if (!gameState || !socket) return;
+  if (!socket || !gameState) return;
 
   const number = parseInt(numberInput.value);
   if (!Number.isInteger(number)) return;
 
   const version = gameState.version;
 
-  if (gameState.phase === "placement") {
-    if (!selectedCell) return;
-
+  if (gameState.phase === "placement" && selectedCell) {
     socket.send(JSON.stringify({
       type: "PLACE_NUMBER",
-      payload: {
-        r: selectedCell.r,
-        c: selectedCell.c,
-        number,
-        version
-      }
+      payload: { ...selectedCell, number, version }
     }));
   }
 
   if (gameState.phase === "match") {
     socket.send(JSON.stringify({
       type: "CALL_NUMBER",
-      payload: {
-        number,
-        version
-      }
+      payload: { number, version }
     }));
   }
 };
@@ -175,9 +195,7 @@ document.getElementById("lockBtn").onclick = () => {
 
   socket.send(JSON.stringify({
     type: "LOCK_GRID",
-    payload: {
-      version: gameState.version
-    }
+    payload: { version: gameState.version }
   }));
 };
 
@@ -199,9 +217,7 @@ function render() {
       const value = player.grid[r][c];
       cell.textContent = value ?? "";
 
-      if (value === "X") {
-        cell.classList.add("marked");
-      }
+      if (value === "X") cell.classList.add("marked");
 
       if (gameState.phase === "placement" && value === null) {
         cell.onclick = () => {
@@ -210,13 +226,8 @@ function render() {
         };
       }
 
-      if (
-        selectedCell &&
-        selectedCell.r === r &&
-        selectedCell.c === c
-      ) {
+      if (selectedCell?.r === r && selectedCell?.c === c)
         cell.classList.add("selected");
-      }
 
       gridEl.appendChild(cell);
     }
@@ -228,9 +239,7 @@ function render() {
 
   if (gameState.phase === "gameover") {
     statusEl.textContent =
-      gameState.winner === playerIndex
-        ? "You won."
-        : "You lost.";
+      gameState.winner === playerIndex ? "You won." : "You lost.";
   } else {
     statusEl.textContent =
       gameState.currentPlayer === playerIndex
