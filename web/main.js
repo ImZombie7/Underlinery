@@ -1,29 +1,56 @@
+<<<<<<< Updated upstream
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7";
+=======
+import { getSocket, setSocket, clearSocket } from "./socket.js";
+import { createClient } from "@supabase/supabase-js";
+>>>>>>> Stashed changes
 
-// =============================
-// SUPABASE CONFIG
-// =============================
+/* =========================
+   ENV VALIDATION
+========================= */
+const {
+  SUPABASE_URL,
+  SUPABASE_ANON_KEY
+} = process.env;
 
+<<<<<<< Updated upstream
 const SUPABASE_URL = "https://umdqileggszqlpjjfxvz.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVtZHFpbGVnZ3N6cWxwampmeHZ6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE4NTA4MjksImV4cCI6MjA4NzQyNjgyOX0.K_rRlUh5dnPpNzpSDEu3hB1__mLTkoDRy7o31z5GjcI";
+=======
+if (!SUPABASE_URL) throw new Error("Missing SUPABASE_URL");
+if (!SUPABASE_ANON_KEY) throw new Error("Missing SUPABASE_ANON_KEY");
+>>>>>>> Stashed changes
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+/* =========================
+   SUPABASE CLIENT
+========================= */
+const supabase = createClient(
+  SUPABASE_URL,
+  SUPABASE_ANON_KEY
+);
 
-// =============================
-// STATE
-// =============================
-
+/* =========================
+   SOCKET STATE
+========================= */
 let socket = null;
+<<<<<<< Updated upstream
 let reconnectAttempts = 0;
 let gameState = null;
 let playerIndex = null;
 let selectedCell = null;
 let currentJwt = null;
+=======
+let retryDelay = 1000;
+let isConnecting = false;
+>>>>>>> Stashed changes
 
-// =============================
-// DOM
-// =============================
+/* =========================
+   CONNECT FUNCTION
+========================= */
+async function connect() {
+  const existing = getSocket();
 
+<<<<<<< Updated upstream
 const authPanel = document.getElementById("auth");
 const emailInput = document.getElementById("email");
 const passwordInput = document.getElementById("password");
@@ -230,9 +257,32 @@ function render() {
         cell.classList.add("selected");
 
       gridEl.appendChild(cell);
-    }
+=======
+  if (existing && existing.readyState === WebSocket.OPEN) {
+    console.log("🟢 Already connected.");
+    return;
   }
 
+  if (isConnecting) {
+    console.log("⏳ Connection already in progress.");
+    return;
+  }
+
+  isConnecting = true;
+
+  try {
+    const {
+      data: { session }
+    } = await supabase.auth.getSession();
+
+    if (!session) {
+      console.log("❌ No session found");
+      isConnecting = false;
+      return;
+>>>>>>> Stashed changes
+    }
+
+<<<<<<< Updated upstream
   ticksEl.textContent = `Ticks: ${player.ticks}`;
   calledEl.textContent =
     "Called: " + (gameState.calledNumbers?.join(", ") || "");
@@ -245,11 +295,54 @@ function render() {
       gameState.currentPlayer === playerIndex
         ? "Your turn."
         : "Opponent's turn.";
+=======
+    const token = session.access_token;
+
+    const ws = new WebSocket(
+      `ws://${location.host}/ws?room=ranked&token=${token}`
+    );
+
+    setSocket(ws);
+
+    ws.onopen = () => {
+      console.log("🟢 Connected to server");
+      retryDelay = 1000;
+      isConnecting = false;
+    };
+
+    ws.onmessage = (event) => {
+      console.log("📩 Server:", event.data);
+    };
+
+    ws.onerror = (err) => {
+      console.log("🔥 Socket error:", err);
+    };
+
+    ws.onclose = (event) => {
+      console.log("🔴 Disconnected:", event.code);
+      clearSocket();
+      isConnecting = false;
+
+      // Reconnect ONLY for unexpected closes
+      if (event.code !== 1000 && event.code !== 1001) {
+        console.log("♻️ Unexpected close. Reconnecting in", retryDelay, "ms");
+        setTimeout(connect, retryDelay);
+        retryDelay = Math.min(retryDelay * 2, 10000);
+      }
+    };
+
+  } catch (err) {
+    console.error("❌ Connect failed:", err);
+    isConnecting = false;
+
+    console.log("♻️ Retry after failure in", retryDelay, "ms");
+    setTimeout(connect, retryDelay);
+    retryDelay = Math.min(retryDelay * 2, 10000);
+>>>>>>> Stashed changes
   }
 }
 
-// =============================
-// INIT
-// =============================
-
-initAuth();
+/* =========================
+   START (ONLY ONCE)
+========================= */
+connect();

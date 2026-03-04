@@ -1,5 +1,6 @@
 import express from "express";
 import http from "http";
+<<<<<<< Updated upstream
 import path from "path";
 import { fileURLToPath } from "url";
 import { WebSocketServer } from "ws";
@@ -25,10 +26,34 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const PORT = process.env.PORT || 5000;
 
+=======
+import { WebSocketServer } from "ws";
+import dotenv from "dotenv";
+import { jwtVerify, createRemoteJWKSet } from "jose";
+
+dotenv.config();
+
+/* =========================
+   ENV VALIDATION
+========================= */
+const {
+  PORT = 5000,
+  SUPABASE_URL,
+  SUPABASE_JWT_ISSUER
+} = process.env;
+
+if (!SUPABASE_URL) throw new Error("SUPABASE_URL missing");
+if (!SUPABASE_JWT_ISSUER) throw new Error("SUPABASE_JWT_ISSUER missing");
+
+/* =========================
+   SERVER SETUP
+========================= */
+>>>>>>> Stashed changes
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocketServer({ noServer: true });
 
+<<<<<<< Updated upstream
 let activeConnections = 0;
 let totalMessages = 0;
 
@@ -46,10 +71,29 @@ const JWKS = createRemoteJWKSet(
   new URL("/auth/v1/keys", SUPABASE_URL)
 );
 
+=======
+app.use(express.static("dist"));
+
+server.listen(PORT, () => {
+  console.log(`🚀 Server running on ${PORT}`);
+});
+
+/* =========================
+   JWKS (AUTO CACHED)
+========================= */
+const JWKS = createRemoteJWKSet(
+  new URL(`${SUPABASE_URL}/auth/v1/.well-known/jwks.json`)
+);
+
+/* =========================
+   VERIFY TOKEN
+========================= */
+>>>>>>> Stashed changes
 async function verifyToken(token) {
   const { payload } = await jwtVerify(token, JWKS, {
     issuer: SUPABASE_JWT_ISSUER,
     audience: "authenticated",
+<<<<<<< Updated upstream
     algorithms: ["RS256"]
   });
   return payload;
@@ -166,13 +210,41 @@ wss.on("connection", (ws, req) => {
 
     playerIndex = room.userMap.size;
     room.userMap.set(userId, playerIndex);
+=======
+    algorithms: ["ES256"]
+  });
+
+  return payload;
+}
+
+/* =========================
+   WEBSOCKET UPGRADE
+========================= */
+server.on("upgrade", async (req, socket, head) => {
+  if (!req.url.startsWith("/ws")) {
+    socket.destroy();
+    return;
   }
 
-  room.clients.add(ws);
-  room.playerMap.set(ws, playerIndex);
+  console.log("⚡ Upgrade request:", req.url);
 
-  sendState(ws, room);
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const token = url.searchParams.get("token");
 
+  if (!token) {
+    console.log("❌ Missing token");
+    socket.destroy();
+    return;
+>>>>>>> Stashed changes
+  }
+
+  try {
+    const user = await verifyToken(token);
+    req.user = user;
+
+    console.log("✅ Authenticated:", user.sub);
+
+<<<<<<< Updated upstream
   /* ================================
      Message Handling
   ================================= */
@@ -289,9 +361,30 @@ function sendState(ws, room) {
       version: room.gameState.version,
       playerIndex: index
     }
-  }));
-}
+=======
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      wss.emit("connection", ws, req);
+    });
 
+  } catch (err) {
+    console.error("❌ Token verification failed:", err.message);
+    socket.destroy();
+  }
+});
+
+/* =========================
+   CONNECTION HANDLER
+========================= */
+wss.on("connection", (ws, req) => {
+  console.log("🟢 Connected:", req.user.sub);
+
+  ws.send(JSON.stringify({
+    type: "CONNECTED",
+    userId: req.user.sub
+>>>>>>> Stashed changes
+  }));
+
+<<<<<<< Updated upstream
 function broadcastState(room) {
   room.clients.forEach(ws => {
     if (ws.readyState === 1) {
@@ -310,4 +403,17 @@ function broadcastState(room) {
 
 server.listen(PORT, () => {
   baseLogger.info(`Server running on ${PORT}`);
+=======
+  ws.on("message", (msg) => {
+    console.log("📨 Message:", msg.toString());
+  });
+
+  ws.on("close", (code) => {
+    console.log("🔴 Disconnected:", code);
+  });
+
+  ws.on("error", (err) => {
+    console.log("🔥 WS error:", err.message);
+  });
+>>>>>>> Stashed changes
 });
