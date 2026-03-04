@@ -1,17 +1,17 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.7";
 
-// =============================
-// SUPABASE CONFIG
-// =============================
+/* =============================
+   SUPABASE CONFIG
+============================= */
 
 const SUPABASE_URL = "https://umdqileggszqlpjjfxvz.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVtZHFpbGVnZ3N6cWxwampmeHZ6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE4NTA4MjksImV4cCI6MjA4NzQyNjgyOX0.K_rRlUh5dnPpNzpSDEu3hB1__mLTkoDRy7o31z5GjcI";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVtZHFpbGVnZ3N6cWxwampmeHZ6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE4NTA4MjksImV4cCI6MjA4NzQyNjgyOX0.K_rRlUh5dnPpNzpSDEu3hB1__mLTkoDRy7o31z5GjcI"; // keep yours
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-// =============================
-// STATE
-// =============================
+/* =============================
+   GLOBAL STATE
+============================= */
 
 let socket = null;
 let reconnectAttempts = 0;
@@ -20,9 +20,9 @@ let playerIndex = null;
 let selectedCell = null;
 let currentJwt = null;
 
-// =============================
-// DOM
-// =============================
+/* =============================
+   DOM REFERENCES
+============================= */
 
 const authPanel = document.getElementById("auth");
 const emailInput = document.getElementById("email");
@@ -35,16 +35,19 @@ const ticksEl = document.getElementById("ticks");
 const calledEl = document.getElementById("called-numbers");
 const statusEl = document.getElementById("status");
 const numberInput = document.getElementById("numberInput");
+const actionBtn = document.getElementById("actionBtn");
+const lockBtn = document.getElementById("lockBtn");
 
-// =============================
-// AUTH
-// =============================
+/* =============================
+   AUTH
+============================= */
 
 async function initAuth() {
   const { data } = await supabase.auth.getSession();
 
   if (!data.session) {
     showAuth();
+    renderEmptyGrid();
     return;
   }
 
@@ -53,7 +56,7 @@ async function initAuth() {
 
 function showAuth() {
   authPanel.style.display = "block";
-  statusEl.textContent = "Login or register to continue.";
+  statusEl.textContent = "Login to continue.";
 }
 
 function hideAuth() {
@@ -72,11 +75,7 @@ loginBtn.onclick = async () => {
     password: passwordInput.value.trim()
   });
 
-  if (error) {
-    alert(error.message);
-    return;
-  }
-
+  if (error) return alert(error.message);
   onAuthenticated(data.session);
 };
 
@@ -86,41 +85,23 @@ registerBtn.onclick = async () => {
     password: passwordInput.value.trim()
   });
 
-  if (error) {
-    alert(error.message);
-    return;
-  }
-
-  alert("Check your email to confirm registration.");
+  if (error) return alert(error.message);
+  alert("Check email to confirm.");
 };
 
-supabase.auth.onAuthStateChange((event, session) => {
-  if (event === "SIGNED_OUT") {
-    disconnectSocket();
-    showAuth();
-  }
-
-  if (event === "TOKEN_REFRESHED" && session?.access_token) {
-    currentJwt = session.access_token;
-    reconnectWithNewToken(currentJwt);
-  }
-});
-
-// =============================
-// WEBSOCKET
-// =============================
+/* =============================
+   WEBSOCKET
+============================= */
 
 function connectSocket(jwt) {
   const protocol = location.protocol === "https:" ? "wss" : "ws";
-  const host = location.host;
 
   socket = new WebSocket(
-    `${protocol}://${host}/ws?room=ranked&token=${encodeURIComponent(jwt)}`
+    `${protocol}://${location.host}/ws?room=ranked&token=${encodeURIComponent(jwt)}`
   );
 
   socket.onopen = () => {
     reconnectAttempts = 0;
-    statusEl.textContent = "Connected.";
   };
 
   socket.onmessage = (event) => {
@@ -134,16 +115,8 @@ function connectSocket(jwt) {
   };
 
   socket.onclose = () => {
-    statusEl.textContent = "Disconnected. Reconnecting...";
     attemptReconnect();
   };
-}
-
-function disconnectSocket() {
-  if (socket) {
-    socket.close();
-    socket = null;
-  }
 }
 
 function attemptReconnect() {
@@ -158,56 +131,80 @@ function attemptReconnect() {
   }, 2000 * reconnectAttempts);
 }
 
-function reconnectWithNewToken(newJwt) {
-  disconnectSocket();
-  connectSocket(newJwt);
-}
+/* =============================
+   ACTION BUTTONS
+============================= */
 
-// =============================
-// GAME ACTIONS
-// =============================
-
-document.getElementById("actionBtn").onclick = () => {
+actionBtn.onclick = () => {
   if (!socket || !gameState) return;
+  if (gameState.playerCount < 2) return;
 
-  const number = parseInt(numberInput.value);
+  const number = Number(numberInput.value);
   if (!Number.isInteger(number)) return;
 
-  const version = gameState.version;
+  if (gameState.phase === "placement") {
+    if (!selectedCell) return;
 
-  if (gameState.phase === "placement" && selectedCell) {
     socket.send(JSON.stringify({
       type: "PLACE_NUMBER",
-      payload: { ...selectedCell, number, version }
+      payload: {
+        r: selectedCell.r,
+        c: selectedCell.c,
+        number,
+        version: gameState.version
+      }
     }));
+
+    selectedCell = null;
   }
 
   if (gameState.phase === "match") {
+    if (gameState.currentPlayer !== playerIndex) return;
+
     socket.send(JSON.stringify({
       type: "CALL_NUMBER",
-      payload: { number, version }
+      payload: {
+        number,
+        version: gameState.version
+      }
     }));
   }
 };
 
-document.getElementById("lockBtn").onclick = () => {
+lockBtn.onclick = () => {
   if (!socket || !gameState) return;
+  if (gameState.playerCount < 2) return;
 
   socket.send(JSON.stringify({
     type: "LOCK_GRID",
-    payload: { version: gameState.version }
+    payload: {
+      version: gameState.version
+    }
   }));
 };
 
-// =============================
-// RENDER
-// =============================
+/* =============================
+   RENDERING
+============================= */
+
+function renderEmptyGrid() {
+  gridEl.innerHTML = "";
+  for (let i = 0; i < 121; i++) {
+    const cell = document.createElement("div");
+    cell.classList.add("cell");
+    gridEl.appendChild(cell);
+  }
+}
 
 function render() {
-  if (!gameState) return;
+  gridEl.innerHTML = "";
+
+  if (!gameState) {
+    renderEmptyGrid();
+    return;
+  }
 
   const player = gameState.me;
-  gridEl.innerHTML = "";
 
   for (let r = 0; r < 11; r++) {
     for (let c = 0; c < 11; c++) {
@@ -219,15 +216,19 @@ function render() {
 
       if (value === "X") cell.classList.add("marked");
 
-      if (gameState.phase === "placement" && value === null) {
+      if (selectedCell?.r === r && selectedCell?.c === c)
+        cell.classList.add("selected");
+
+      if (
+        gameState.phase === "placement" &&
+        value === null &&
+        !player.locked
+      ) {
         cell.onclick = () => {
           selectedCell = { r, c };
           render();
         };
       }
-
-      if (selectedCell?.r === r && selectedCell?.c === c)
-        cell.classList.add("selected");
 
       gridEl.appendChild(cell);
     }
@@ -237,19 +238,37 @@ function render() {
   calledEl.textContent =
     "Called: " + (gameState.calledNumbers?.join(", ") || "");
 
+  /* =============================
+     STATUS LOGIC (CLEAN UX)
+  ============================= */
+
+  if (gameState.playerCount < 2) {
+    statusEl.textContent = "Waiting for opponent...";
+    return;
+  }
+
+  if (gameState.phase === "placement") {
+    statusEl.textContent = player.locked
+      ? "Waiting for opponent to lock..."
+      : "Place your numbers.";
+    return;
+  }
+
   if (gameState.phase === "gameover") {
     statusEl.textContent =
       gameState.winner === playerIndex ? "You won." : "You lost.";
-  } else {
-    statusEl.textContent =
-      gameState.currentPlayer === playerIndex
-        ? "Your turn."
-        : "Opponent's turn.";
+    return;
   }
+
+  statusEl.textContent =
+    gameState.currentPlayer === playerIndex
+      ? "Your turn."
+      : "Opponent's turn.";
 }
 
-// =============================
-// INIT
-// =============================
+/* =============================
+   INIT
+============================= */
 
+renderEmptyGrid();
 initAuth();

@@ -1,97 +1,113 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Underlinery</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Underlinery</title>
 
-<style>
-body {
-  margin: 0;
-  background: #0f0f0f;
-  color: white;
-  font-family: system-ui, sans-serif;
-  text-align: center;
-}
+  <style>
+    body {
+      margin: 0;
+      background: #0f0f0f;
+      color: white;
+      font-family: system-ui, sans-serif;
+      text-align: center;
+    }
 
-#auth {
-  margin-top: 20px;
-}
+    #auth {
+      margin-top: 20px;
+    }
 
-input, button {
-  padding: 6px;
-  margin: 4px;
-  background: #1a1a1a;
-  border: 1px solid #333;
-  color: white;
-}
+    input, button {
+      padding: 6px;
+      margin: 4px;
+      background: #1a1a1a;
+      border: 1px solid #333;
+      color: white;
+    }
 
-button:hover {
-  background: #333;
-  cursor: pointer;
-}
+    button:hover {
+      background: #333;
+      cursor: pointer;
+    }
 
-#grid {
-  display: grid;
-  grid-template-columns: repeat(11, 32px);
-  gap: 3px;
-  justify-content: center;
-  margin: 25px auto;
-}
+    #grid {
+      display: grid;
+      grid-template-columns: repeat(11, 32px);
+      gap: 3px;
+      justify-content: center;
+      margin: 25px auto;
+    }
 
-.cell {
-  width: 32px;
-  height: 32px;
-  background: #222;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-}
+    .cell {
+      width: 32px;
+      height: 32px;
+      background: #222;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+    }
 
-.cell.marked {
-  background: limegreen;
-  color: black;
-}
+    .cell.marked {
+      background: limegreen;
+      color: black;
+    }
 
-.cell.selected {
-  outline: 2px solid gold;
-}
-</style>
+    .cell.selected {
+      outline: 2px solid gold;
+    }
+
+    #credit {
+      margin-top: 20px;
+    }
+
+    #credit a {
+      color: limegreen;
+      text-decoration: none;
+    }
+
+    #credit a:hover {
+      text-decoration: underline;
+    }
+  </style>
 </head>
 
 <body>
 
-<h1>Underlinery</h1>
+  <h1>Underlinery</h1>
 
-<div id="auth">
-  <input id="email" type="email" placeholder="Email" />
-  <input id="password" type="password" placeholder="Password" />
-  <br />
-  <button id="loginBtn">Login</button>
-  <button id="registerBtn">Register</button>
-</div>
+  <div id="auth">
+    <label for="email">Email</label>
+    <input id="email" type="email" placeholder="Email" />
 
-<div id="status"></div>
+    <label for="password">Password</label>
+    <input id="password" type="password" placeholder="Password" />
+    <br />
+    <button id="loginBtn">Login</button>
+    <button id="registerBtn">Register</button>
+  </div>
 
-<div id="grid"></div>
+  <div id="status"></div>
 
-<div id="ticks"></div>
-<div id="called-numbers"></div>
+  <div id="grid"></div>
 
-<div>
-  <input id="numberInput" type="number" min="1" max="121" placeholder="Number" />
-  <button id="actionBtn">Submit</button>
-  <button id="lockBtn">Lock Grid</button>
-</div>
+  <div id="ticks"></div>
+  <div id="called-numbers"></div>
 
-<div id="credit">
-  <a href="https://github.com/ImZombie7/Underlinery" target="_blank">
-    By Nayart The Zombie
-  </a>
-</div>
+  <div>
+    <input id="numberInput" type="number" min="1" max="121" placeholder="Number" />
+    <button id="actionBtn">Submit</button>
+    <button id="lockBtn">Lock Grid</button>
+  </div>
 
-<script type="module" src="main.js"></script>
+  <div id="credit">
+    <a href="https://github.com/ImZombie7/Underlinery" target="_blank">
+      By Nayart The Zombie
+    </a>
+  </div>
+
+  <script type="module" src="main.js"></script>
 
 </body>
 </html>
