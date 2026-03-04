@@ -1,149 +1,199 @@
 import express from "express";
 import http from "http";
-import path from "path";
-import { fileURLToPath } from "url";
-import { WebSocketServer, WebSocket } from "ws";
-import jwt from "jsonwebtoken";
-import pino from "pino";
-import { jwtVerify, createRemoteJWKSet } from 'jose';
-
-const JWKS = createRemoteJWKSet(
-  new URL('https://YOUR_PROJECT_ID.supabase.co/auth/v1/keys')
-);
-
-async function verifyToken(token) {
-  const { payload } = await jwtVerify(token, JWKS, {
-    issuer: `https://YOUR_PROJECT_ID.supabase.co/auth/v1`,
-    audience: 'authenticated'
-  });
-
-  return payload;
-}
+import { WebSocketServer } from "ws";
+import dotenv from "dotenv";
+import { jwtVerify, createRemoteJWKSet } from "jose";
 
 import { getRoom, removeClient } from "./network/roomManager.js";
 import { validateMessage } from "./network/validate.js";
-import { placeNumber, callNumber, lockGrid, performToss } from "./engine/rules.js";
-import { TURN_TIME_MS, RECONNECT_GRACE_MS } from "./engine/state.js";
+import {
+  placeNumber,
+  lockGrid,
+  performToss,
+  callNumber
+} from "./engine/rules.js";
 
-const logger = pino();
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const PORT = process.env.PORT || 5000;
+dotenv.config();
+
+const {
+  PORT = 5000,
+  SUPABASE_URL,
+  SUPABASE_JWT_ISSUER
+} = process.env;
+
+if (!SUPABASE_URL) throw new Error("SUPABASE_URL missing");
+if (!SUPABASE_JWT_ISSUER) throw new Error("SUPABASE_JWT_ISSUER missing");
 
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocketServer({ noServer: true });
 
-app.use(express.static(path.join(__dirname, "../web")));
+app.use(express.static("dist"));
 
-function verifyJWT(token) {
-  try {
-    return jwt.verify(token, process.env.SUPABASE_JWT_SECRET);
-  } catch {
-    return null;
-  }
-}
-
-server.on("upgrade", (req, socket, head) => {
-  wss.handleUpgrade(req, socket, head, ws => {
-    wss.emit("connection", ws, req);
-  });
+server.listen(PORT, () => {
+  console.log(`🚀 Server running on ${PORT}`);
 });
 
-wss.on("connection", (ws, req) => {
+/* ================= JWT ================= */
+
+const JWKS = createRemoteJWKSet(
+  new URL(`${SUPABASE_URL}/auth/v1/.well-known/jwks.json`)
+);
+
+async function verifyToken(token) {
+  const { payload } = await jwtVerify(token, JWKS, {
+    issuer: SUPABASE_JWT_ISSUER,
+    audience: "authenticated",
+    algorithms: ["ES256"]
+  });
+  return payload;
+}
+
+/* ================= UPGRADE ================= */
+
+server.on("upgrade", async (req, socket, head) => {
+  if (!req.url.startsWith("/ws")) {
+    socket.destroy();
+    return;
+  }
+
   const url = new URL(req.url, `http://${req.headers.host}`);
-  const roomId = url.searchParams.get("room") || "ranked";
   const token = url.searchParams.get("token");
+  const roomId = url.searchParams.get("room") || "ranked";
 
-  if (!token) return ws.close();
+  if (!token) {
+    socket.destroy();
+    return;
+  }
 
-  const decoded = verifyJWT(token);
-  if (!decoded) return ws.close();
+  try {
+    const user = await verifyToken(token);
+    req.user = user;
+    req.roomId = roomId;
 
-  const userId = decoded.sub;
-  const room = getRoom(roomId);
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      wss.emit("connection", ws, req);
+    });
+
+  } catch {
+    socket.destroy();
+  }
+});
+
+/* ================= CONNECTION ================= */
+
+wss.on("connection", (ws, req) => {
+  const room = getRoom(req.roomId);
+  const userId = req.user.sub;
 
   let playerIndex;
 
-  if (room.userMap.has(userId)) {
-    playerIndex = room.userMap.get(userId);
-  } else {
-    if (room.userMap.size >= 2) return ws.close();
+  if (!room.userMap.has(userId)) {
+    if (room.userMap.size >= 2) {
+      ws.close();
+      return;
+    }
     playerIndex = room.userMap.size;
     room.userMap.set(userId, playerIndex);
+  } else {
+    playerIndex = room.userMap.get(userId);
   }
 
   room.clients.add(ws);
   room.playerMap.set(ws, playerIndex);
 
-  sendState(ws, room);
+  console.log(`🟢 ${userId} joined as player ${playerIndex}`);
 
-  ws.on("message", raw => {
-    const msg = validateMessage(raw.toString());
-    if (!msg) return;
+  sendState(ws, room, playerIndex);
 
-    const index = room.playerMap.get(ws);
+  ws.on("message", (raw) => {
+    if (room.userMap.size < 2) return; // 🚫 Require 2 players
+
+    const validated = validateMessage(raw.toString());
+    if (!validated) return;
+
+    const { type, payload } = validated;
+
+    if (payload.version !== room.gameState.version) return;
+
     let success = false;
 
-    if (msg.type === "PLACE_NUMBER") {
-      success = placeNumber(room.gameState, index,
-        msg.payload.r, msg.payload.c, msg.payload.number);
+    switch (type) {
+      case "PLACE_NUMBER":
+        success = placeNumber(
+          room.gameState,
+          playerIndex,
+          payload.r,
+          payload.c,
+          payload.number
+        );
+        break;
+
+      case "LOCK_GRID":
+        success = lockGrid(room.gameState, playerIndex);
+
+        if (
+          success &&
+          room.userMap.size === 2 &&
+          room.gameState.phase === "toss"
+        ) {
+          performToss(room.gameState);
+        }
+        break;
+
+      case "CALL_NUMBER":
+        success = callNumber(
+          room.gameState,
+          playerIndex,
+          payload.number
+        );
+        break;
     }
 
-    if (msg.type === "LOCK_GRID") {
-      success = lockGrid(room.gameState, index);
-      if (success && room.gameState.phase === "toss") {
-        performToss(room.gameState);
-      }
-    }
+    if (!success) return;
 
-    if (msg.type === "CALL_NUMBER") {
-      success = callNumber(room.gameState, index, msg.payload.number);
-    }
-
-    if (success) broadcastState(room);
+    broadcast(room);
   });
 
   ws.on("close", () => {
-    const index = room.playerMap.get(ws);
-
-    room.disconnectTimers.set(index,
-      setTimeout(() => {
-        if (room.gameState.phase !== "gameover") {
-          room.gameState.phase = "gameover";
-          room.gameState.winner = 1 - index;
-          broadcastState(room);
-        }
-      }, RECONNECT_GRACE_MS)
-    );
-
-    removeClient(roomId, ws);
+    removeClient(req.roomId, ws);
   });
 });
 
-server.listen(PORT, () => {
-  logger.info(`Server running on ${PORT}`);
-});
+/* ================= BROADCAST ================= */
 
-function sendState(ws, room) {
-  const index = room.playerMap.get(ws);
+function broadcast(room) {
+  for (const client of room.clients) {
+    const playerIndex = room.playerMap.get(client);
 
+    client.send(JSON.stringify({
+      type: "GAME_STATE_UPDATE",
+      payload: serializeState(room.gameState, playerIndex, room.userMap.size)
+    }));
+  }
+}
+
+function sendState(ws, room, playerIndex) {
   ws.send(JSON.stringify({
     type: "GAME_STATE_UPDATE",
-    payload: {
-      phase: room.gameState.phase,
-      currentPlayer: room.gameState.currentPlayer,
-      calledNumbers: [...room.gameState.calledNumbers],
-      me: room.gameState.players[index],
-      winner: room.gameState.winner,
-      version: room.gameState.version
-    }
+    payload: serializeState(room.gameState, playerIndex, room.userMap.size)
   }));
 }
 
-function broadcastState(room) {
-  room.clients.forEach(ws => {
-    if (ws.readyState === WebSocket.OPEN)
-      sendState(ws, room);
-  });
+/* ================= SERIALIZE ================= */
+
+function serializeState(state, playerIndex, playerCount) {
+  return {
+    version: state.version,
+    phase: state.phase,
+    currentPlayer: state.currentPlayer,
+    winner: state.winner,
+    playerIndex,
+    playerCount,
+    me: {
+      ...state.players[playerIndex],
+      usedNumbers: Array.from(state.players[playerIndex].usedNumbers)
+    },
+    calledNumbers: Array.from(state.calledNumbers)
+  };
 }
