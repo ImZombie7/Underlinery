@@ -1,76 +1,54 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Underlinery</title>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Underlinery</title>
 
-  <style>
-    body {
-      margin: 0;
-      background: #0f0f0f;
-      color: white;
-      font-family: system-ui, sans-serif;
-      text-align: center;
-    }
+<style>
+body{
+  margin:0;
+  background:#0f0f0f;
+  color:white;
+  font-family:system-ui,sans-serif;
+  text-align:center;
+}
 
-    #auth {
-      margin-top: 20px;
-    }
+#grid{
+  display:grid;
+  grid-template-columns:repeat(11,32px);
+  gap:3px;
+  justify-content:center;
+  margin:25px auto;
+}
 
-    input, button {
-      padding: 6px;
-      margin: 4px;
-      background: #1a1a1a;
-      border: 1px solid #333;
-      color: white;
-    }
+.cell{
+  width:32px;
+  height:32px;
+  background:#222;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  cursor:pointer;
+}
 
-    button:hover {
-      background: #333;
-      cursor: pointer;
-    }
+.cell.marked{
+  background:limegreen;
+  color:black;
+}
 
-    #grid {
-      display: grid;
-      grid-template-columns: repeat(11, 32px);
-      gap: 3px;
-      justify-content: center;
-      margin: 25px auto;
-    }
+#status{
+  margin-top:10px;
+}
 
-    .cell {
-      width: 32px;
-      height: 32px;
-      background: #222;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-    }
+#credit{
+  margin-top:20px;
+}
 
-    .cell.marked {
-      background: limegreen;
-      color: black;
-    }
-
-    .cell.selected {
-      outline: 2px solid gold;
-    }
-
-    #credit {
-      margin-top: 20px;
-    }
-
-    #credit a {
-      color: limegreen;
-      text-decoration: none;
-    }
-
-    #credit a:hover {
-      text-decoration: underline;
-    }
-  </style>
+#credit a{
+  color:limegreen;
+}
+</style>
 </head>
 
 <body>
@@ -92,22 +70,25 @@
 
   <div id="grid"></div>
 
-  <div id="ticks"></div>
-  <div id="called-numbers"></div>
+<div id="auth">
+<input id="email" placeholder="email">
+<input id="password" type="password" placeholder="password">
+<button id="loginBtn">Login</button>
+<button id="registerBtn">Register</button>
+</div>
 
-  <div>
-    <input id="numberInput" type="number" min="1" max="121" placeholder="Number" />
-    <button id="actionBtn">Submit</button>
-    <button id="lockBtn">Lock Grid</button>
-  </div>
+<div id="status"></div>
+<div id="grid"></div>
+<div id="ticks"></div>
+<div id="called"></div>
 
-  <div id="credit">
-    <a href="https://github.com/ImZombie7/Underlinery" target="_blank">
-      By Nayart The Zombie
-    </a>
-  </div>
+<div id="credit">
+<a href="https://github.com/ImZombie7/Underlinery">
+By Nayart The Zombie
+</a>
+</div>
 
-  <script type="module" src="main.js"></script>
+<script type="module" src="main.js"></script>
 
 </body>
 </html>
