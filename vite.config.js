@@ -1,13 +1,3 @@
-<<<<<<< Updated upstream
-import { defineConfig } from "vite";
-
-export default defineConfig({
-  root: "web",
-  build: {
-    outDir: "../dist",
-    emptyOutDir: true
-  }
-=======
 import { defineConfig } from "vite";
 
 export default defineConfig({
@@ -19,5 +9,4 @@ export default defineConfig({
   define: {
     'process.env': process.env
   }
->>>>>>> Stashed changes
 });

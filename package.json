@@ -1,6 +1,6 @@
 {
   "name": "underlinery",
-  "version": "0.5.0",
+  "version": "1.4.0",
   "type": "module",
   "scripts": {
     "server": "node src/server.js",
@@ -15,13 +15,7 @@
     "jose": "^5.0.0",
     "jsonwebtoken": "^9.0.2",
     "pino": "^9.0.0",
-<<<<<<< Updated upstream
-    "jsonwebtoken": "^9.0.2",
-    "jose": "^5.0.0",
-    "@supabase/supabase-js": "^2.0.0"
-=======
     "ws": "^8.16.0"
->>>>>>> Stashed changes
   },
   "devDependencies": {
     "vite": "^5.0.0"
