@@ -89,96 +89,33 @@ server.on("upgrade", async (req, socket, head) => {
 
 /* ================= CONNECTION ================= */
 
-wss.on("connection", (ws, req) => {
+/* ================= CONNECTION ================= */
 
+wss.on("connection", (ws, req) => {
   const room = getRoom(req.roomId);
   const userId = req.user.sub;
 
+  // 🔥 Update activity when someone connects
+  room.lastActivityAt = Date.now();
+
   let playerIndex;
-
-  if (!room.userMap.has(userId)) {
-
-    if (room.userMap.size >= 2) {
-      ws.close();
-      return;
-    }
-
-    playerIndex = room.userMap.size;
-    room.userMap.set(userId, playerIndex);
-
-  } else {
-    playerIndex = room.userMap.get(userId);
-  }
-
-  room.clients.add(ws);
-  room.playerMap.set(ws, playerIndex);
-
-  console.log(`🟢 ${req.name} joined as player ${playerIndex}`);
-
-  sendState(ws, room, playerIndex);
-
+  
   ws.on("message", (raw) => {
-
     if (room.userMap.size < 2) return;
+
+    // 🔥 Update activity whenever a message is received
+    room.lastActivityAt = Date.now();
 
     const validated = validateMessage(raw.toString());
     if (!validated) return;
-
-    const { type, payload } = validated;
-
-    if (payload.version !== room.gameState.version) return;
-
-    let success = false;
-
-    switch (type) {
-
-      case "PLACE_NUMBER":
-
-        success = placeNumber(
-          room.gameState,
-          playerIndex,
-          payload.r,
-          payload.c,
-          payload.number
-        );
-
-        break;
-
-      case "LOCK_GRID":
-
-        success = lockGrid(room.gameState, playerIndex);
-
-        if (
-          success &&
-          room.userMap.size === 2 &&
-          room.gameState.phase === "toss"
-        ) {
-          performToss(room.gameState);
-        }
-
-        break;
-
-      case "CALL_NUMBER":
-
-        success = callNumber(
-          room.gameState,
-          playerIndex,
-          payload.number
-        );
-
-        break;
-    }
-
-    if (!success) return;
-
-    broadcast(room);
-
   });
 
   ws.on("close", () => {
     removeClient(req.roomId, ws);
-  });
 
+    // 🔥 Update activity when someone disconnects
+    room.lastActivityAt = Date.now();
+  });
 });
 
 /* ================= BROADCAST ================= */
