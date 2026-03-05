@@ -23,8 +23,6 @@ export function getRoom(roomId) {
   return rooms.get(roomId);
 }
 
-room.lastActivityAt=Date.now();
-
 export function deleteRoom(roomId) {
   const room = rooms.get(roomId);
   if (!room) return;
