@@ -46,7 +46,6 @@ async function verifyToken(token) {
     audience: "authenticated",
     algorithms: ["ES256"]
   });
-
   return payload;
 }
 
@@ -209,6 +208,14 @@ function broadcast(room){
 
 function sendState(ws, room, playerIndex){
 
+    client.send(JSON.stringify({
+      type: "GAME_STATE_UPDATE",
+      payload: serializeState(room.gameState, playerIndex, room.userMap.size)
+    }));
+  }
+}
+
+function sendState(ws, room, playerIndex) {
   ws.send(JSON.stringify({
     type:"GAME_STATE_UPDATE",
     payload:serializeState(
