@@ -1,6 +1,6 @@
 {
   "name": "underlinery",
-  "version": "0.5.0",
+  "version": "1.4.0",
   "type": "module",
   "scripts": {
     "server": "node src/server.js",

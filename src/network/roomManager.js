@@ -23,6 +23,27 @@ export function getRoom(roomId) {
   return rooms.get(roomId);
 }
 
+export function getRoom(roomId){
+
+if(!rooms.has(roomId)){
+
+rooms.set(roomId,{
+gameState:createInitialState(),
+clients:new Set(),
+playerMap:new Map(),
+userMap:new Map(),
+createdAt:Date.now(),
+lastActivityAt:Date.now()
+})
+
+}
+
+return rooms.get(roomId)
+
+}
+
+room.lastActivityAt=Date.now();
+
 export function deleteRoom(roomId) {
   const room = rooms.get(roomId);
   if (!room) return;
